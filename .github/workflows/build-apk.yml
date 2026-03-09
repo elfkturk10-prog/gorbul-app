@@ -42,13 +42,34 @@ jobs:
           EOF
           dart run flutter_launcher_icons
 
-      - name: Rename App to GörBul
+      - name: Configure Target App & Firebase
         run: |
+          # Eksik Android altyapısını yeniden oluştur
+          flutter create . --platforms=android || true
+          
+          # App ismini düzelt
           sed -i 's/android:label="gorbul"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
           sed -i 's/android:label="görbultaslak1"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
+
+          # settings.gradle (Modern Flutter plugins) içerisine google-services ekle
+          sed -i 's/id "dev.flutter.flutter-plugin-loader" version "1.0.0"/id "dev.flutter.flutter-plugin-loader" version "1.0.0"\n    id "com.google.gms.google-services" version "4.4.1" apply false/' android/settings.gradle || true
+          
+          # android/app/build.gradle dosyasındaki plugins kismine google-services ekle
+          sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/' android/app/build.gradle || true
+          
+          # build.gradle (Eski Flutter tarzı varsa)
+          sed -i 's/dependencies {/dependencies {\n        classpath "com.google.gms:google-services:4.4.1"/' android/build.gradle || true
+          sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle || true
+
+          # Multidex ve MinSdkVersion (Firestore hatasını engellemek için)
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
+          
+          # minSdkVersion eger 21 falansa her halükarda 23 yapalim
+          sed -i 's/minSdkVersion 21/minSdkVersion 23/' android/app/build.gradle || true
           
       - name: Build APK
         run: flutter build apk --release
+
         
       - name: Upload APK
         uses: actions/upload-artifact@v4

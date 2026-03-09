@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "42998799966",
+    "project_id": "gobul-d6ff3",
+    "storage_bucket": "gobul-d6ff3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:42998799966:android:d913e3b3c141dc454a5ecf",
+        "android_client_info": {
+          "package_name": "com.example.gorbul"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD3Znmu-yv_LBIKTttcADSpdkJ6AyDsYBY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
