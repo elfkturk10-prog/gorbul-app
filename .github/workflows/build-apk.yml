@@ -31,6 +31,14 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
         
+      - name: Configure App Icon
+        run: dart run flutter_launcher_icons
+
+      - name: Rename App to GörBul
+        run: |
+          sed -i 's/android:label="gorbul"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
+          sed -i 's/android:label="görbultaslak1"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
+          
       - name: Build APK
         run: flutter build apk --release
         

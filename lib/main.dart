@@ -135,10 +135,52 @@ class GorBulApp extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // DATA MODELS
 // ---------------------------------------------------------------------------
+class User {
+  final String id;
+  final String name;
+  final String surname;
+  final String tc;
+  final String email;
+  final String password;
+
+  User({
+    required this.id,
+    required this.name,
+    required this.surname,
+    required this.tc,
+    required this.email,
+    required this.password,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'surname': surname,
+      'tc': tc,
+      'email': email,
+      'password': password,
+    };
+  }
+
+  factory User.fromJson(Map<String, dynamic> json) {
+    return User(
+      id: json['id'],
+      name: json['name'],
+      surname: json['surname'],
+      tc: json['tc'],
+      email: json['email'],
+      password: json['password'],
+    );
+  }
+}
+
 class Listing {
   final String id;
   final String title;
   final String location;
+  final double? latitude;
+  final double? longitude;
   final DateTime date;
   final String imageUrl; // Dosya yolu veya URL
   final File? imageFile; // Yerel test için
@@ -152,6 +194,8 @@ class Listing {
     required this.id,
     required this.title,
     required this.location,
+    this.latitude,
+    this.longitude,
     required this.date,
     this.imageUrl = '',
     this.imageFile,
@@ -167,6 +211,8 @@ class Listing {
       'id': id,
       'title': title,
       'location': location,
+      'latitude': latitude,
+      'longitude': longitude,
       'date': date.toIso8601String(),
       'imageUrl': imageUrl,
       'imageFilePath': imageFile?.path,
@@ -183,6 +229,8 @@ class Listing {
       id: json['id'],
       title: json['title'],
       location: json['location'],
+      latitude: json['latitude'],
+      longitude: json['longitude'],
       date: DateTime.parse(json['date']),
       imageUrl: json['imageUrl'] ?? '',
       imageFile: json['imageFilePath'] != null ? File(json['imageFilePath']) : null,
@@ -195,12 +243,60 @@ class Listing {
   }
 }
 
+class VaultItem {
+  final String id;
+  final String title;
+  final String serial;
+  final String date;
+  final int iconCodePoint;
+  final int colorValue;
+
+  VaultItem({
+    required this.id,
+    required this.title,
+    required this.serial,
+    required this.date,
+    required this.iconCodePoint,
+    required this.colorValue,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'serial': serial,
+        'date': date,
+        'iconCodePoint': iconCodePoint,
+        'colorValue': colorValue,
+      };
+
+  factory VaultItem.fromJson(Map<String, dynamic> json) => VaultItem(
+        id: json['id'],
+        title: json['title'],
+        serial: json['serial'],
+        date: json['date'],
+        iconCodePoint: json['iconCodePoint'],
+        colorValue: json['colorValue'],
+      );
+}
+
 class ChatMessage {
   final String text;
   final bool isMe;
   final String time;
 
   ChatMessage({required this.text, required this.isMe, required this.time});
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        'isMe': isMe,
+        'time': time,
+      };
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
+        text: json['text'],
+        isMe: json['isMe'],
+        time: json['time'],
+      );
 }
 
 class ChatPreview {
@@ -209,6 +305,7 @@ class ChatPreview {
   final String lastMessage;
   final String time;
   final String avatarUrl;
+  final List<ChatMessage> messages; // Mesaj geçmişi
 
   ChatPreview({
     required this.id,
@@ -216,16 +313,41 @@ class ChatPreview {
     required this.lastMessage,
     required this.time,
     required this.avatarUrl,
+    this.messages = const [],
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'lastMessage': lastMessage,
+        'time': time,
+        'avatarUrl': avatarUrl,
+        'messages': messages.map((m) => m.toJson()).toList(),
+      };
+
+  factory ChatPreview.fromJson(Map<String, dynamic> json) => ChatPreview(
+        id: json['id'],
+        name: json['name'],
+        lastMessage: json['lastMessage'],
+        time: json['time'],
+        avatarUrl: json['avatarUrl'],
+        messages: (json['messages'] as List?)
+                ?.map((m) => ChatMessage.fromJson(m))
+                .toList() ??
+            [],
+      );
 }
 
 // Data Store (Persistent with path_provider)
 class DataStore {
   static List<Listing> listings = [];
   static List<String> favoriteListingIds = []; // Favori ilan ID'leri
-  static final List<ChatPreview> chats = [];
+  static List<ChatPreview> chats = [];
+  static List<VaultItem> vaultItems = [];
   static bool isLoggedIn = false;
   static bool hasSeenOnboarding = false;
+  static List<User> registeredUsers = [];
+  static User? currentUser;
 
   static Future<File> _getFile(String filename) async {
     final dir = await getApplicationDocumentsDirectory();
@@ -239,6 +361,15 @@ class DataStore {
         final data = jsonDecode(await prefsFile.readAsString());
         isLoggedIn = data['isLoggedIn'] ?? false;
         hasSeenOnboarding = data['hasSeenOnboarding'] ?? false;
+        if (data['currentUser'] != null) {
+          currentUser = User.fromJson(data['currentUser']);
+        }
+      }
+
+      final usersFile = await _getFile('users.json');
+      if (await usersFile.exists()) {
+        final List<dynamic> jsonList = jsonDecode(await usersFile.readAsString());
+        registeredUsers = jsonList.map((j) => User.fromJson(j)).toList();
       }
 
       final listingsFile = await _getFile('listings.json');
@@ -252,6 +383,18 @@ class DataStore {
         final List<dynamic> jsonList = jsonDecode(await favsFile.readAsString());
         favoriteListingIds = jsonList.map((j) => j.toString()).toList();
       }
+
+      final chatsFile = await _getFile('chats.json');
+      if (await chatsFile.exists()) {
+        final List<dynamic> jsonList = jsonDecode(await chatsFile.readAsString());
+        chats = jsonList.map((j) => ChatPreview.fromJson(j)).toList();
+      }
+
+      final vaultsFile = await _getFile('vaults.json');
+      if (await vaultsFile.exists()) {
+        final List<dynamic> jsonList = jsonDecode(await vaultsFile.readAsString());
+        vaultItems = jsonList.map((j) => VaultItem.fromJson(j)).toList();
+      }
     } catch (e) {
       print("DataStore init error: $e");
     }
@@ -263,6 +406,7 @@ class DataStore {
       await file.writeAsString(jsonEncode({
         'isLoggedIn': isLoggedIn,
         'hasSeenOnboarding': hasSeenOnboarding,
+        'currentUser': currentUser?.toJson(),
       }));
     } catch (e) {
       print("Error saving prefs: $e");
@@ -287,8 +431,49 @@ class DataStore {
     }
   }
 
-  static Future<void> setLoggedIn(bool value) async {
+  static Future<void> _saveUsers() async {
+    try {
+      final file = await _getFile('users.json');
+      await file.writeAsString(jsonEncode(registeredUsers.map((u) => u.toJson()).toList()));
+    } catch (e) {
+      print("Error saving users: $e");
+    }
+  }
+
+  static Future<void> saveChats() async {
+    try {
+      final file = await _getFile('chats.json');
+      await file.writeAsString(jsonEncode(chats.map((c) => c.toJson()).toList()));
+    } catch (e) {
+      print("Error saving chats: $e");
+    }
+  }
+
+  static Future<void> saveVaultItems() async {
+    try {
+      final file = await _getFile('vaults.json');
+      await file.writeAsString(jsonEncode(vaultItems.map((v) => v.toJson()).toList()));
+    } catch (e) {
+      print("Error saving vaults: $e");
+    }
+  }
+
+  static Future<void> registerUser(User user) async {
+    registeredUsers.add(user);
+    await _saveUsers();
+  }
+
+  static Future<void> setLoggedIn(bool value, {User? user}) async {
     isLoggedIn = value;
+    if (user != null) {
+      currentUser = user;
+    }
+    await _savePrefs();
+  }
+  
+  static Future<void> logout() async {
+    isLoggedIn = false;
+    currentUser = null;
     await _savePrefs();
   }
 
@@ -636,24 +821,41 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() {
         _isLoading = true;
-        _loadingText = "Cihaz Güvenliği Taranıyor...";
-      });
-
-      setState(() {
         _loadingText = "Doğrulanıyor...";
       });
+
+      // Gerçek kullanıcı doğrulama işlemi
+      String tc = _tcController.text;
+      String password = _portalCodeController.text;
+
+      // Local db'den kullanıcıyı ara
+      User? user;
+      try {
+        user = DataStore.registeredUsers.firstWhere(
+            (u) => u.tc == tc && u.password == password);
+      } catch (e) {
+        user = null;
+      }
+
+      await Future.delayed(const Duration(seconds: 1)); // UX için küçük animasyon gecikmesi
 
       if (!mounted) return;
       setState(() => _isLoading = false);
 
-      await DataStore.setLoggedIn(true);
-
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        // Artık doğrudan HomeScreen'e değil, Main(BottomNav) ekranına gidiyor.
-        MaterialPageRoute(builder: (context) => const MainScreen()),
-      );
+      if (user != null) {
+        await DataStore.setLoggedIn(true, user: user);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const MainScreen()),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Hatalı T.C. Kimlik No veya Parola!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -859,10 +1061,38 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       
-      // Şimdilik sadece lokal kayıt algısı yaratıyoruz, Firebase entegre edilmediği için direkt geçiş.
-
+      String tc = _tcController.text;
+      
+      // TC Kimlik No ile kayıtlı kullanıcı var mı kontrol et
+      bool userExists = DataStore.registeredUsers.any((u) => u.tc == tc);
+      
+      await Future.delayed(const Duration(seconds: 1)); // UX
+      
       if (!mounted) return;
       setState(() => _isLoading = false);
+
+      if (userExists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bu T.C. Kimlik No sisteme zaten kayıtlı!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Yeni kullanıcı oluştur
+      User newUser = User(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: _nameController.text.trim(),
+        surname: _surnameController.text.trim(),
+        tc: tc,
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+
+      // Datastore'a kaydet
+      await DataStore.registerUser(newUser);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1145,34 +1375,55 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // Harbi Arama ve Filtre Fonksiyonu
-  void _filterListings() {
-    setState(() {
-      String query = _searchController.text.trim().toLowerCase();
-      
-      _displayedListings = DataStore.listings.where((listing) {
-        // 1. Arama Metni Filtresi
-        bool matchesQuery = true;
-        if (query.isNotEmpty) {
-           final titleLower = listing.title.toLowerCase();
-           final locLower = listing.location.toLowerCase();
-           matchesQuery = titleLower.contains(query) || locLower.contains(query);
-        }
+  Future<void> _filterListings() async {
+    Position? currentPos;
+    if (_selectedFilter == 'Yakınımdakiler') {
+      try {
+        currentPos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      } catch (e) {
+        // İzin vb yoksa alınamaz
+      }
+    }
 
-        // 2. Çip (Kategori/Durum) Filtresi
-        bool matchesFilter = true;
-        if (_selectedFilter == 'Kayıplar') {
-           matchesFilter = listing.title.toLowerCase().contains('kayıp') || listing.isUrgent; // Basit mock tespit
-        } else if (_selectedFilter == 'Bulunanlar') {
-           matchesFilter = listing.title.toLowerCase().contains('bulundu') || listing.title.toLowerCase().contains('sahipsiz');
-        } else if (_selectedFilter == 'Elektronik') {
-           matchesFilter = listing.title.toLowerCase().contains('telefon') || listing.title.toLowerCase().contains('elektronik') || listing.title.toLowerCase().contains('bilgisayar');
-        } else if (_selectedFilter == 'Yakınımdakiler') {
-           matchesFilter = listing.location.toLowerCase().contains('istanbul') || listing.location.toLowerCase().contains('kadıköy'); // Mock yakınlık
-        }
+    final query = _searchController.text.trim().toLowerCase();
+    
+    final filtered = DataStore.listings.where((listing) {
+      // 1. Arama Metni Filtresi
+      bool matchesQuery = true;
+      if (query.isNotEmpty) {
+        final titleLower = listing.title.toLowerCase();
+        final locLower = listing.location.toLowerCase();
+        matchesQuery = titleLower.contains(query) || locLower.contains(query);
+      }
 
-        return matchesQuery && matchesFilter;
-      }).toList();
-    });
+      // 2. Çip (Kategori/Durum) Filtresi
+      bool matchesFilter = true;
+      if (_selectedFilter == 'Kayıplar') {
+        matchesFilter = listing.title.toLowerCase().contains('kayıp') || listing.isUrgent; // Basit mock tespit
+      } else if (_selectedFilter == 'Bulunanlar') {
+        matchesFilter = listing.title.toLowerCase().contains('bulundu') || listing.title.toLowerCase().contains('sahipsiz');
+      } else if (_selectedFilter == 'Elektronik') {
+        matchesFilter = listing.title.toLowerCase().contains('telefon') || listing.title.toLowerCase().contains('elektronik') || listing.title.toLowerCase().contains('bilgisayar');
+      } else if (_selectedFilter == 'Yakınımdakiler') {
+        if (currentPos != null && listing.latitude != null && listing.longitude != null) {
+          final distance = Geolocator.distanceBetween(
+             currentPos.latitude, currentPos.longitude, 
+             listing.latitude!, listing.longitude!
+          );
+          matchesFilter = distance <= 10000; // 10 km içi
+        } else {
+          matchesFilter = false; // Konum alınamazsa veya ilanın konumu yoksa gösterme
+        }
+      }
+
+      return matchesQuery && matchesFilter;
+    }).toList();
+
+    if (mounted) {
+      setState(() {
+        _displayedListings = filtered;
+      });
+    }
   }
 
   // Geri gelindiğinde listeyi yenilemek için
@@ -2117,6 +2368,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
   }
 
   bool _isLocating = false;
+  double? _currentLat;
+  double? _currentLng;
 
   Future<void> _fetchCurrentLocation() async {
     bool permitted = await AppUtils.requestEducationalPermission(
@@ -2150,6 +2403,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
 
       setState(() {
         _isLocating = false;
+        _currentLat = position.latitude;
+        _currentLng = position.longitude;
         // İleride Reverse Geocoding ile adresi de alabiliriz, şimdilik koordinat + GPS onaylı metni koyuyoruz.
         _locationController.text =
             "Koordinat: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)} (GPS Onaylı) \u2714";
@@ -2185,6 +2440,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         title: _titleController.text,
         location: _locationController.text,
+        latitude: _currentLat,
+        longitude: _currentLng,
         date: DateTime.now(),
         imageFile: _selectedImages.first, // Gerçek DB'de ilk fotoğraf (_selectedImages.first) kullanılır
         securityQuestion: _securityQuestionController.text,
@@ -3739,32 +3996,57 @@ class ChatDetailScreen extends StatefulWidget {
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _msgController = TextEditingController();
-  final List<ChatMessage> _messages = [];
+  late ChatPreview currentChat;
 
   @override
   void initState() {
     super.initState();
-    // Gelen kişi ve bağlama göre ilk mock mesajlarını yükle
-    _messages.add(ChatMessage(text: 'Merhaba! ${widget.chatName} ilanı için yazıyorum.', isMe: true, time: '10:00'));
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted) {
-        setState(() {
-          _messages.add(ChatMessage(text: 'Merhaba, tabii nasıl yardımcı olabilirim?', isMe: false, time: '10:01'));
-        });
-      }
-    });
+    // Sohbeti bul veya yarat
+    int index = DataStore.chats.indexWhere((c) => c.name == widget.userName);
+    if (index == -1) {
+      currentChat = ChatPreview(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: widget.userName,
+        lastMessage: 'Merhaba! ${widget.chatName} ilanı için yazıyorum.',
+        time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}',
+        avatarUrl: 'https://via.placeholder.com/150',
+        messages: [
+           ChatMessage(text: 'Merhaba! ${widget.chatName} ilanı için yazıyorum.', isMe: true, time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}')
+        ],
+      );
+      DataStore.chats.add(currentChat);
+      DataStore.saveChats();
+    } else {
+      currentChat = DataStore.chats[index];
+    }
   }
 
   void _sendMessage() {
     if (_msgController.text.trim().isEmpty) return;
+    String text = _msgController.text;
+    String time = '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}';
+    
     setState(() {
-      _messages.add(ChatMessage(
-          text: _msgController.text,
+      currentChat.messages.add(ChatMessage(
+          text: text,
           isMe: true,
-          time:
-              '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'));
+          time: time));
       _msgController.clear();
     });
+    
+    // Chat lastMessage güncelle
+    int index = DataStore.chats.indexOf(currentChat);
+    if(index != -1) {
+       DataStore.chats[index] = ChatPreview(
+           id: currentChat.id, 
+           name: currentChat.name, 
+           lastMessage: text, 
+           time: time, 
+           avatarUrl: currentChat.avatarUrl, 
+           messages: currentChat.messages
+       );
+    }
+    DataStore.saveChats();
   }
 
   @override
@@ -3788,9 +4070,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
+              itemCount: currentChat.messages.length,
               itemBuilder: (context, index) {
-                final msg = _messages[index];
+                final msg = currentChat.messages[index];
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Align(
@@ -4166,14 +4448,61 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
   }
 }
 
-class MockMapScreen extends StatelessWidget {
+class MockMapScreen extends StatefulWidget {
   final Listing listing;
   const MockMapScreen({super.key, required this.listing});
 
   @override
+  State<MockMapScreen> createState() => _MockMapScreenState();
+}
+
+class _MockMapScreenState extends State<MockMapScreen> {
+  String _distanceText = 'Hesaplanıyor...';
+
+  @override
+  void initState() {
+    super.initState();
+    _calculateDistance();
+  }
+
+  Future<void> _calculateDistance() async {
+    if (widget.listing.latitude == null || widget.listing.longitude == null) {
+      if (mounted) setState(() => _distanceText = 'Konum bilgisi eksik');
+      return;
+    }
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+          if (mounted) setState(() => _distanceText = 'Konum izni yok');
+          return;
+        }
+      }
+
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      
+      double distanceInMeters = Geolocator.distanceBetween(
+        position.latitude, 
+        position.longitude, 
+        widget.listing.latitude!, 
+        widget.listing.longitude!
+      );
+      
+      if (mounted) {
+        setState(() {
+          _distanceText = '${(distanceInMeters / 1000).toStringAsFixed(1)} km';
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _distanceText = 'Uzaklık hesabı başarısız');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // <-- EKRAN İSKELETİ EKLENDİ
       body: Stack(
         // <-- WIDGET'LAR ÜST ÜSTE BİNSİN DİYE STACK EKLENDİ
         children: [
@@ -4202,7 +4531,7 @@ class MockMapScreen extends StatelessWidget {
                       BoxShadow(color: Colors.black26, blurRadius: 4)
                     ],
                   ),
-                  child: Text(listing.location,
+                  child: Text(widget.listing.location,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(height: 8),
@@ -4227,20 +4556,20 @@ class MockMapScreen extends StatelessWidget {
               child: Row(
                 children: [
                   CircleAvatar(
-                    backgroundImage: listing.imageFile != null
-                        ? FileImage(listing.imageFile!) as ImageProvider
-                        : NetworkImage(listing.imageUrl),
+                    backgroundImage: widget.listing.imageFile != null
+                        ? FileImage(widget.listing.imageFile!) as ImageProvider
+                        : NetworkImage(widget.listing.imageUrl),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(listing.title,
+                        Text(widget.listing.title,
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 16)),
-                        const Text('Tahmini uzaklık: 2.4 km',
-                            style: TextStyle(color: Colors.grey, fontSize: 12)),
+                        Text('Uzaklık: $_distanceText',
+                            style: const TextStyle(color: Colors.grey, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -4575,17 +4904,16 @@ class LeaderboardScreen extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // 12. DIGITAL VAULT (DİJİTAL EŞYA DOLABIM) SCREEN
 // ---------------------------------------------------------------------------
-class DigitalVaultScreen extends StatelessWidget {
+class DigitalVaultScreen extends StatefulWidget {
   const DigitalVaultScreen({super.key});
 
   @override
+  State<DigitalVaultScreen> createState() => _DigitalVaultScreenState();
+}
+
+class _DigitalVaultScreenState extends State<DigitalVaultScreen> {
+  @override
   Widget build(BuildContext context) {
-    // Mock Veri
-    final List<Map<String, dynamic>> vaultItems = [
-      {'title': 'MacBook Pro M2', 'serial': 'C02XXXXX', 'date': '12 Eyl 2025', 'icon': Icons.laptop_mac, 'color': Colors.grey},
-      {'title': 'Elektrikli Bisiklet', 'serial': 'BTR-8921', 'date': '05 Eki 2025', 'icon': Icons.electric_bike, 'color': Colors.green},
-      {'title': 'Golden Retriever (Pati)', 'serial': 'Çip: 98102...', 'date': '10 Kas 2025', 'icon': Icons.pets, 'color': Colors.orange},
-    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -4596,8 +4924,20 @@ class DigitalVaultScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
+              // Basit, hızlı ekleme senaryosu simülasyonu ama gerçek listeye kaydedecek.
+              setState(() {
+                DataStore.vaultItems.add(VaultItem(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  title: 'Özel Eşya ${DataStore.vaultItems.length + 1}',
+                  serial: 'SN-${DateTime.now().millisecondsSinceEpoch}',
+                  date: '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                  iconCodePoint: Icons.save.codePoint,
+                  colorValue: Colors.blue.value,
+                ));
+                DataStore.saveVaultItems();
+              });
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Eşya Ekleme Formu Açılıyor (Simülasyon)...')),
+                const SnackBar(content: Text('Hızlı Eşya Eklendi.')),
               );
             },
           )
@@ -4619,24 +4959,24 @@ class DigitalVaultScreen extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: vaultItems.isEmpty 
+            child: DataStore.vaultItems.isEmpty 
               ? const Center(child: Text('Dolabınız şu an boş.'))
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
-                  itemCount: vaultItems.length,
+                  itemCount: DataStore.vaultItems.length,
                   itemBuilder: (context, index) {
-                    final item = vaultItems[index];
+                     final item = DataStore.vaultItems[index];
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       child: ExpansionTile(
                         leading: Container(
                           padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(color: item['color']!.withOpacity(0.1), shape: BoxShape.circle),
-                          child: Icon(item['icon'], color: item['color']),
+                          decoration: BoxDecoration(color: Color(item.colorValue).withOpacity(0.1), shape: BoxShape.circle),
+                          child: Icon(IconData(item.iconCodePoint, fontFamily: 'MaterialIcons'), color: Color(item.colorValue)),
                         ),
-                        title: Text(item['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('Kayıt: ${item['date']}'),
+                        title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('Kayıt: ${item.date}'),
                         children: [
                           Padding(
                             padding: const EdgeInsets.all(16.0),
@@ -4646,7 +4986,7 @@ class DigitalVaultScreen extends StatelessWidget {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text('Seri / Çip No: ${item['serial']}', style: TextStyle(color: Colors.grey[700], fontWeight: FontWeight.bold)),
+                                    Text('Seri / Çip No: ${item.serial}', style: TextStyle(color: Colors.grey[700], fontWeight: FontWeight.bold)),
                                     const Icon(Icons.verified_user, color: Colors.green, size: 16),
                                   ],
                                 ),
