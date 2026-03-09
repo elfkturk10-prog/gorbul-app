@@ -1970,21 +1970,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: const BoxDecoration(
-                        color: Colors.redAccent,
-                        borderRadius: BorderRadius.only(topRight: Radius.circular(8)),
-                      ),
-                      child: const Text(
-                        'YENİ', 
-                        style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                  if (DateTime.now().difference(listing.date).inHours <= 24)
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: const BoxDecoration(
+                          color: Colors.redAccent,
+                          borderRadius: BorderRadius.only(topRight: Radius.circular(8)),
+                        ),
+                        child: const Text(
+                          'YENİ', 
+                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
