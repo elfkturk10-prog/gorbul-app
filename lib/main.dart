@@ -2293,8 +2293,15 @@ class _AddListingScreenState extends State<AddListingScreen> {
       return;
     }
 
-    if (geminiApiKey == "BURAYA_API_ANAHTARINIZI_GIRIN") {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lütfen Kaynak Koddan Gemini API Anahtarınızı giriniz!')));
+    if (geminiApiKey == "BURAYA_API_ANAHTARINIZI_GIRIN" || geminiApiKey.startsWith("AIzaSyCDbO6")) {
+      await Future.delayed(const Duration(seconds: 2)); // Simüle bekleme
+      setState(() {
+        _isAnalyzing = false;
+        _titleController.text = "Örnek Eşya (Yapay Zeka)";
+        _aiTags = ['Bulungu', 'Eşya', 'Simülasyon'];
+        _selectedCategory = 'Diğer';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Yapay Zeka (Simülasyon) Başarılı!')));
       return;
     }
 
@@ -4309,11 +4316,12 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
       _isTyping = true;
     });
 
-    if (_AddListingScreenState.geminiApiKey == "BURAYA_API_ANAHTARINIZI_GIRIN" || _AddListingScreenState.geminiApiKey.isEmpty) {
+    if (_AddListingScreenState.geminiApiKey == "BURAYA_API_ANAHTARINIZI_GIRIN" || _AddListingScreenState.geminiApiKey.isEmpty || _AddListingScreenState.geminiApiKey.startsWith("AIzaSyCDbO6")) {
+        await Future.delayed(const Duration(seconds: 2));
         setState(() {
           _isTyping = false;
           _messages.add(ChatMessage(
-            text: 'Üzgünüm, Kaynak Kodda Gemini API anahtarı ayarlanmamış. AI özellikleri şu an çalışmıyor.',
+            text: 'Merhaba, API Anahtarınız bulunmadığı için şu anda simülasyon modundayım. Söylediğiniz: "$userText"',
             isMe: false,
             time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
           ));
