@@ -1,0 +1,28 @@
+name: gorbul
+description: "GörBul Kayıp Eşya ve Yardımlaşma Uygulaması"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.3 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  image_picker: any
+  flutter_image_compress: any
+  permission_handler: any
+  intl: any
+  path_provider: any
+  firebase_core: any
+  geolocator: ^13.0.2
+  http: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
