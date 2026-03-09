@@ -1025,126 +1025,19 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 style: TextStyle(color: Colors.white70, fontSize: 12)),
                           ],
                         ),
-                            if (!AppUtils.validateTcKimlik(value)) {
-                              return 'Geçersiz T.C. Kimlik No';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Portal Kodu
-                        TextFormField(
-                          controller: _portalCodeController,
-                          style: const TextStyle(color: Colors.black87),
-                          decoration: const InputDecoration(
-                            labelText: 'Portal Kodu',
-                            hintText: 'Örn: AOGLU-2026',
-                            prefixIcon: Icon(Icons.lock_outline),
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Portal kodu gerekli';
-                            if (!value.contains('-'))
-                              return 'Hatalı format (XXX-0000)';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 24),
-
-                        // Giriş Butonu
-                        SizedBox(
-                          height: 56,
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _login,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0A1F44),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16)),
-                            ),
-                            child: _isLoading
-                                ? Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                              color: Colors.white,
-                                              strokeWidth: 2)),
-                                      const SizedBox(width: 12),
-                                      Text(_loadingText,
-                                          style: const TextStyle(
-                                              fontSize: 14,
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold)),
-                                    ],
-                                  )
-                                : const Text('PORTALA GİRİŞ',
-                                    style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 1.0)),
-                          ),
-                        ),
-                        
-                        // YENİ EKLENEN KAYIT OL BUTONU
-                        const SizedBox(height: 16),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                            );
-                          },
-                          child: const Text(
-                            'Sisteme kayıtlı değil misin? Hemen Kayıt Ol',
-                            style: TextStyle(color: Color(0xFF0A1F44), fontWeight: FontWeight.bold),
-                          ),
-                        ),
                       ],
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.security,
-                      color: Colors.greenAccent[400], size: 16),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Güvenliğiniz Sistem Taraması Altındadır.',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
                 ],
               ),
-              const SizedBox(height: 16),
-              // GİZLİ MÜDÜR PORTALI ERİŞİMİ
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.admin_panel_settings, color: Colors.white30),
-                    tooltip: 'Yönetici Portalı',
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const ManagerLoginScreen()),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 16),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // 2.1 MANAGER LOGIN SCREEN (MÜDÜR PORTALI)
