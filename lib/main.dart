@@ -1053,8 +1053,214 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              // GİZLİ MÜDÜR PORTALI ERİŞİMİ
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.admin_panel_settings, color: Colors.white30),
+                    tooltip: 'Yönetici Portalı',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const ManagerLoginScreen()),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 16),
+                ],
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2.1 MANAGER LOGIN SCREEN (MÜDÜR PORTALI)
+// ---------------------------------------------------------------------------
+class ManagerLoginScreen extends StatefulWidget {
+  const ManagerLoginScreen({super.key});
+
+  @override
+  State<ManagerLoginScreen> createState() => _ManagerLoginScreenState();
+}
+
+class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
+  final _codeController = TextEditingController();
+  bool _isLoading = false;
+
+  // Sabit Okul Kodları (Firebase'e de taşınabilir)
+  final List<String> validCodes = [
+    'BALIKESIR_AAL_2026',
+    'BALIKESIR_FEN_2026',
+    'BALIKESIR_EML_2026'
+  ];
+
+  void _loginManager() async {
+    setState(() => _isLoading = true);
+    await Future.delayed(const Duration(seconds: 1)); // UX Mock
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    String inputCode = _codeController.text.trim();
+
+    if (validCodes.contains(inputCode)) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const ManagerDashboardScreen()),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar( // Hata Mesajı
+        const SnackBar(
+          content: Text('Geçersiz Portal Kodu!'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF1E1E1E), // Daha koyu, resmi bir tema
+      appBar: AppBar(
+        title: const Text('Müdür Portalı Girişi'),
+        backgroundColor: Colors.black,
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.account_balance, size: 80, color: Colors.blueGrey),
+              const SizedBox(height: 24),
+              const Text(
+                'Sistem Yöneticisi Doğrulanıyor',
+                style: TextStyle(color: Colors.white70, fontSize: 18),
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: _codeController,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Özel Yetki Kodu',
+                  labelStyle: TextStyle(color: Colors.blueGrey),
+                  prefixIcon: Icon(Icons.key, color: Colors.blueGrey),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
+                ),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _loginManager,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
+                  child: _isLoading 
+                      ? const CircularProgressIndicator(color: Colors.white) 
+                      : const Text('PORTALI AÇ', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2.2 MANAGER DASHBOARD SCREEN (MÜDÜR ALANI)
+// ---------------------------------------------------------------------------
+class ManagerDashboardScreen extends StatelessWidget {
+  const ManagerDashboardScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final listings = DataStore.listings; // Firebase'den check edilen tüm listings
+    final urgentCount = listings.where((l) => l.isUrgent).length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('GörBul - Okul Paneli'),
+        backgroundColor: Colors.black,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.exit_to_app),
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          )
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Okul İstatistikleri',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: _buildStatCard('Toplam İlan', listings.length.toString(), Colors.blue)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildStatCard('Acil Durumlar', urgentCount.toString(), Colors.red)),
+              ],
+            ),
+            const SizedBox(height: 32),
+            const Text(
+              'Son İlan Hareketleri',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: listings.isEmpty
+                  ? const Center(child: Text('Henüz kampüste ilan yok.'))
+                  : ListView.builder(
+                      itemCount: listings.length,
+                      itemBuilder: (context, index) {
+                        final listing = listings[index];
+                        return ListTile(
+                          leading: Icon(
+                            listing.isUrgent ? Icons.warning_amber_rounded : Icons.campaign,
+                            color: listing.isUrgent ? Colors.red : Colors.grey,
+                          ),
+                          title: Text(listing.title),
+                          subtitle: Text('Konum: ${listing.location}'),
+                          trailing: Text(listing.date.toString().substring(0, 10)),
+                        );
+                      },
+                    ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, Color color) {
+    return Card(
+      elevation: 4,
+      color: color.withOpacity(0.1),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Text(title, style: TextStyle(fontSize: 16, color: color, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(value, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+          ],
         ),
       ),
     );
@@ -1078,6 +1284,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _tcController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _passwordConfirmController = TextEditingController();
   bool _isLoading = false;
 
   void _register() async {
@@ -1221,13 +1428,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // ŞİFRE
                         TextFormField(
                           controller: _passwordController,
                           obscureText: true,
                           decoration: const InputDecoration(labelText: 'Şifre Belirle', prefixIcon: Icon(Icons.lock)),
                           validator: (value) {
                             if (value == null || value.length < 6) return 'Şifre en az 6 hane olmalı';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // ŞİFRE (TEKRAR) EKLENDİ
+                        TextFormField(
+                          controller: _passwordConfirmController,
+                          obscureText: true,
+                          decoration: const InputDecoration(labelText: 'Şifre (Tekrar)', prefixIcon: Icon(Icons.lock_outline)),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) return 'Şifreyi tekrar girin';
+                            if (value != _passwordController.text) return 'Şifreler eşleşmiyor patron!';
                             return null;
                           },
                         ),
