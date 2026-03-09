@@ -141,6 +141,7 @@ class User {
   final String tc;
   final String email;
   final String password;
+  final String schoolName;
 
   User({
     required this.id,
@@ -149,6 +150,7 @@ class User {
     required this.tc,
     required this.email,
     required this.password,
+    required this.schoolName,
   });
 
   Map<String, dynamic> toJson() {
@@ -159,17 +161,19 @@ class User {
       'tc': tc,
       'email': email,
       'password': password,
+      'schoolName': schoolName,
     };
   }
 
   factory User.fromJson(Map<String, dynamic> json) {
     return User(
-      id: json['id'],
-      name: json['name'],
-      surname: json['surname'],
-      tc: json['tc'],
-      email: json['email'],
-      password: json['password'],
+      id: json['id'] ?? '',
+      name: json['name'] ?? '',
+      surname: json['surname'] ?? '',
+      tc: json['tc'] ?? '',
+      email: json['email'] ?? '',
+      password: json['password'] ?? '',
+      schoolName: json['schoolName'] ?? 'Belirtilmedi',
     );
   }
 }
@@ -188,6 +192,7 @@ class Listing {
   final bool isUrgent;
   final String ownerName;
   final String rewardAmount;
+  final String schoolName;
 
   Listing({
     required this.id,
@@ -203,6 +208,7 @@ class Listing {
     this.isUrgent = false,
     this.ownerName = 'Anonim Kullanıcı',
     this.rewardAmount = '',
+    this.schoolName = 'Belirtilmedi',
   });
 
   Map<String, dynamic> toJson() {
@@ -220,17 +226,18 @@ class Listing {
       'isUrgent': isUrgent,
       'ownerName': ownerName,
       'rewardAmount': rewardAmount,
+      'schoolName': schoolName,
     };
   }
 
   factory Listing.fromJson(Map<String, dynamic> json) {
     return Listing(
-      id: json['id'],
-      title: json['title'],
-      location: json['location'],
+      id: json['id'] ?? '',
+      title: json['title'] ?? '',
+      location: json['location'] ?? '',
       latitude: json['latitude'],
       longitude: json['longitude'],
-      date: DateTime.parse(json['date']),
+      date: json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
       imageUrl: json['imageUrl'] ?? '',
       imageFile: json['imageFilePath'] != null ? File(json['imageFilePath']) : null,
       securityQuestion: json['securityQuestion'] ?? '',
@@ -238,6 +245,7 @@ class Listing {
       isUrgent: json['isUrgent'] ?? false,
       ownerName: json['ownerName'] ?? 'Anonim Kullanıcı',
       rewardAmount: json['rewardAmount'] ?? '',
+      schoolName: json['schoolName'] ?? 'Belirtilmedi',
     );
   }
 }
@@ -833,25 +841,34 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
+class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  // Tab 1 - Giriş
+  final _loginFormKey = GlobalKey<FormState>();
   final _tcController = TextEditingController();
-  final _portalCodeController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _isLoading = false;
-  String _loadingText = "Doğrulanıyor...";
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   void _login() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _isLoading = true;
-        _loadingText = "Doğrulanıyor...";
-      });
+    if (_loginFormKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
 
-      // Gerçek kullanıcı doğrulama işlemi
       String tc = _tcController.text;
-      String password = _portalCodeController.text;
+      String password = _passwordController.text;
 
-      // Local db'den kullanıcıyı ara
       User? user;
       try {
         user = DataStore.registeredUsers.firstWhere(
@@ -860,8 +877,7 @@ class _LoginScreenState extends State<LoginScreen> {
         user = null;
       }
 
-      await Future.delayed(const Duration(seconds: 1)); // UX için küçük animasyon gecikmesi
-
+      await Future.delayed(const Duration(seconds: 1));
       if (!mounted) return;
       setState(() => _isLoading = false);
 
@@ -874,7 +890,7 @@ class _LoginScreenState extends State<LoginScreen> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Hatalı T.C. Kimlik No veya Parola!'),
+            content: Text('Hatalı T.C. Kimlik No veya Şifre!'),
             backgroundColor: Colors.red,
           ),
         );
@@ -886,78 +902,129 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).primaryColor,
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Ekstra Güvenlik Kalkanı İkonu
-              const Stack(alignment: Alignment.center, children: [
-                Icon(Icons.shield, size: 100, color: Colors.white24),
-                Icon(Icons.saved_search_rounded, size: 60, color: Colors.white),
-              ]),
-              const SizedBox(height: 16),
-              const Text(
-                'GörBul',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 1.5,
-                ),
-              ),
-              const Text(
-                'Kayıp Eşya Portalı',
-                style: TextStyle(color: Colors.white70, fontSize: 16),
-              ),
-              const SizedBox(height: 48),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SizedBox(height: 32),
+            // Logo & Başlık
+            const Stack(alignment: Alignment.center, children: [
+              Icon(Icons.shield, size: 80, color: Colors.white24),
+              Icon(Icons.saved_search_rounded, size: 48, color: Colors.white),
+            ]),
+            const SizedBox(height: 12),
+            const Text('GörBul',
+                style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.5)),
+            const Text('Kayıp Eşya Portalı',
+                style: TextStyle(color: Colors.white70, fontSize: 14)),
+            const SizedBox(height: 24),
 
-              // Kart İçinde Form
-              Card(
-                color: Theme.of(context).cardTheme.color ?? Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(24)),
-                elevation: 8,
-                child: Padding(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Form(
-                    key: _formKey,
+            // Tab Bar
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                indicator: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                labelColor: const Color(0xFF0A1F44),
+                unselectedLabelColor: Colors.white70,
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                tabs: const [
+                  Tab(text: 'Giriş Yap'),
+                  Tab(text: 'Kayıt Ol'),
+                  Tab(text: 'Yönetici'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Tab İçerikleri
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  // ---- SEKME 1: ÖĞRENCİ GİRİŞİ ----
+                  SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Row(
+                        Card(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          elevation: 6,
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Form(
+                              key: _loginFormKey,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  const Text('Hesabına Giriş Yap',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0A1F44))),
+                                  const SizedBox(height: 20),
+                                  TextFormField(
+                                    controller: _tcController,
+                                    keyboardType: TextInputType.number,
+                                    maxLength: 11,
+                                    decoration: const InputDecoration(
+                                      labelText: 'T.C. Kimlik No',
+                                      prefixIcon: Icon(Icons.perm_identity),
+                                      counterText: '',
+                                    ),
+                                    validator: (v) {
+                                      if (v == null || v.isEmpty) return 'Zorunlu alan';
+                                      if (!AppUtils.validateTcKimlik(v)) return 'Geçersiz T.C. No';
+                                      return null;
+                                    },
+                                  ),
+                                  const SizedBox(height: 16),
+                                  TextFormField(
+                                    controller: _passwordController,
+                                    obscureText: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Şifre',
+                                      prefixIcon: Icon(Icons.lock_outline),
+                                    ),
+                                    validator: (v) => (v == null || v.isEmpty) ? 'Şifre gerekli' : null,
+                                  ),
+                                  const SizedBox(height: 24),
+                                  SizedBox(
+                                    height: 52,
+                                    child: ElevatedButton(
+                                      onPressed: _isLoading ? null : _login,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF0A1F44),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                      ),
+                                      child: _isLoading
+                                          ? const SizedBox(width: 22, height: 22,
+                                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                          : const Text('GİRİŞ YAP',
+                                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.lock_person,
-                                color: Color(0xFF0A1F44), size: 28),
-                            SizedBox(width: 8),
-                            Text(
-                              'Giriş Yap',
-                              style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0A1F44)),
-                              textAlign: TextAlign.center,
-                            ),
+                            Icon(Icons.security, color: Colors.greenAccent[400], size: 16),
+                            const SizedBox(width: 6),
+                            const Text('Verileriniz şifreli & güvende.',
+                                style: TextStyle(color: Colors.white70, fontSize: 12)),
                           ],
                         ),
-                        const SizedBox(height: 24),
-
-                        // TC Numarası
-                        TextFormField(
-                          controller: _tcController,
-                          keyboardType: TextInputType.number,
-                          maxLength: 11,
-                          style: const TextStyle(color: Colors.black87),
-                          decoration: const InputDecoration(
-                            labelText: 'T.C. Kimlik No',
-                            prefixIcon: Icon(Icons.perm_identity),
-                            counterText: "",
-                          ),
-                          validator: (value) {
-                            if (value == null || value.isEmpty)
-                              return 'Zorunlu alan';
                             if (!AppUtils.validateTcKimlik(value)) {
                               return 'Geçersiz T.C. Kimlik No';
                             }
@@ -1093,31 +1160,38 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
   final _codeController = TextEditingController();
   bool _isLoading = false;
 
-  // Sabit Okul Kodları (Firebase'e de taşınabilir)
-  final List<String> validCodes = [
-    'BALIKESIR_AAL_2026',
-    'BALIKESIR_FEN_2026',
-    'BALIKESIR_EML_2026'
-  ];
+  // Okul portal kodları (kısaltma bazlı, yılsız)
+  // Kod -> Okul Adı eşleştirmesi
+  static const Map<String, String> schoolPortalCodes = {
+    'ATL':   'Albay Tayyar Lisesi',
+    'BL':    'Balıkesir Lisesi',
+    'FEKAL': 'Sırrı Yırcalı Anadolu Lisesi (FEKAL)',
+    'AML':   'Adnan Menderes Lisesi',
+    'RKAL':  'Rahmi Kula Anadolu Lisesi (RKAL)',
+    'ISBL':  'İstanbulluoğlu Sosyal Bilimler Lisesi (İSBL)',
+  };
 
   void _loginManager() async {
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 1)); // UX Mock
+    await Future.delayed(const Duration(milliseconds: 800));
 
     if (!mounted) return;
     setState(() => _isLoading = false);
 
-    String inputCode = _codeController.text.trim();
+    String inputCode = _codeController.text.trim().toUpperCase();
+    String? schoolName = schoolPortalCodes[inputCode];
 
-    if (validCodes.contains(inputCode)) {
+    if (schoolName != null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const ManagerDashboardScreen()),
+        MaterialPageRoute(
+          builder: (context) => ManagerDashboardScreen(schoolName: schoolName),
+        ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar( // Hata Mesajı
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Geçersiz Portal Kodu!'),
+          content: Text('Geçersiz Portal Kodu! Lütfen okul kodunuzu doğru girin.'),
           backgroundColor: Colors.red,
         ),
       );
@@ -1127,10 +1201,11 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1E1E1E), // Daha koyu, resmi bir tema
+      backgroundColor: const Color(0xFF0D1B2A),
       appBar: AppBar(
-        title: const Text('Müdür Portalı Girişi'),
+        title: const Text('Okul Yönetici Portalı'),
         backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
       ),
       body: Center(
         child: Padding(
@@ -1139,19 +1214,27 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(Icons.account_balance, size: 80, color: Colors.blueGrey),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
               const Text(
-                'Sistem Yöneticisi Doğrulanıyor',
-                style: TextStyle(color: Colors.white70, fontSize: 18),
+                'Okul Yöneticisi Doğrulaması',
+                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 8),
+              const Text(
+                'Okulunuza özel portal kodunu girin.',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              const SizedBox(height: 32),
               TextField(
                 controller: _codeController,
                 obscureText: true,
-                style: const TextStyle(color: Colors.white),
+                textCapitalization: TextCapitalization.characters,
+                style: const TextStyle(color: Colors.white, letterSpacing: 2),
                 decoration: const InputDecoration(
-                  labelText: 'Özel Yetki Kodu',
+                  labelText: 'Portal Kodu (Kısaltma)',
                   labelStyle: TextStyle(color: Colors.blueGrey),
+                  hintText: 'Örn: ATL, BL, FEKAL...',
+                  hintStyle: TextStyle(color: Colors.white24),
                   prefixIcon: Icon(Icons.key, color: Colors.blueGrey),
                   enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
                   focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
@@ -1160,15 +1243,19 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
               const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,
-                height: 50,
+                height: 52,
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _loginManager,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
-                  child: _isLoading 
-                      ? const CircularProgressIndicator(color: Colors.white) 
-                      : const Text('PORTALI AÇ', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueGrey,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('PORTALI AÇ',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ),
-              )
+              ),
             ],
           ),
         ),
@@ -1181,23 +1268,30 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
 // 2.2 MANAGER DASHBOARD SCREEN (MÜDÜR ALANI)
 // ---------------------------------------------------------------------------
 class ManagerDashboardScreen extends StatelessWidget {
-  const ManagerDashboardScreen({super.key});
+  final String schoolName;
+  const ManagerDashboardScreen({super.key, required this.schoolName});
 
   @override
   Widget build(BuildContext context) {
-    final listings = DataStore.listings; // Firebase'den check edilen tüm listings
-    final urgentCount = listings.where((l) => l.isUrgent).length;
+    // SADECE bu okulun ilanlarını filtrele
+    final myListings = DataStore.listings
+        .where((l) => l.schoolName == schoolName)
+        .toList();
+    final myUsers = DataStore.registeredUsers
+        .where((u) => u.schoolName == schoolName)
+        .toList();
+    final urgentCount = myListings.where((l) => l.isUrgent).length;
 
     return Scaffold(
+      backgroundColor: const Color(0xFF0D1B2A),
       appBar: AppBar(
-        title: const Text('GörBul - Okul Paneli'),
+        title: Text(schoolName, style: const TextStyle(fontSize: 16)),
         backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.exit_to_app),
-            onPressed: () {
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context),
           )
         ],
       ),
@@ -1206,39 +1300,51 @@ class ManagerDashboardScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Okul İstatistikleri',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
+            // İstat Kartları
             Row(
               children: [
-                Expanded(child: _buildStatCard('Toplam İlan', listings.length.toString(), Colors.blue)),
-                const SizedBox(width: 16),
-                Expanded(child: _buildStatCard('Acil Durumlar', urgentCount.toString(), Colors.red)),
+                Expanded(child: _buildStatCard('Toplam İlan', myListings.length.toString(), Colors.blueAccent)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildStatCard('Acil', urgentCount.toString(), Colors.red)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildStatCard('Öğrenciler', myUsers.length.toString(), Colors.green)),
               ],
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
             const Text(
-              'Son İlan Hareketleri',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              'İlan Hareketleri',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Expanded(
-              child: listings.isEmpty
-                  ? const Center(child: Text('Henüz kampüste ilan yok.'))
+              child: myListings.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Bu okulda henüz ilan yok.',
+                        style: TextStyle(color: Colors.white54),
+                      ))
                   : ListView.builder(
-                      itemCount: listings.length,
+                      itemCount: myListings.length,
                       itemBuilder: (context, index) {
-                        final listing = listings[index];
-                        return ListTile(
-                          leading: Icon(
-                            listing.isUrgent ? Icons.warning_amber_rounded : Icons.campaign,
-                            color: listing.isUrgent ? Colors.red : Colors.grey,
+                        final listing = myListings[index];
+                        return Card(
+                          color: const Color(0xFF1E2D3D),
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: Icon(
+                              listing.isUrgent ? Icons.warning_amber_rounded : Icons.campaign,
+                              color: listing.isUrgent ? Colors.redAccent : Colors.blueGrey,
+                            ),
+                            title: Text(listing.title, style: const TextStyle(color: Colors.white)),
+                            subtitle: Text(
+                              listing.location,
+                              style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            ),
+                            trailing: Text(
+                              listing.date.toString().substring(0, 10),
+                              style: const TextStyle(color: Colors.white38, fontSize: 11),
+                            ),
                           ),
-                          title: Text(listing.title),
-                          subtitle: Text('Konum: ${listing.location}'),
-                          trailing: Text(listing.date.toString().substring(0, 10)),
                         );
                       },
                     ),
@@ -1251,21 +1357,23 @@ class ManagerDashboardScreen extends StatelessWidget {
 
   Widget _buildStatCard(String title, String value, Color color) {
     return Card(
-      elevation: 4,
-      color: color.withOpacity(0.1),
+      color: color.withOpacity(0.15),
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         child: Column(
           children: [
-            Text(title, style: TextStyle(fontSize: 16, color: color, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text(value, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold)),
+            Text(value,
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: color)),
+            const SizedBox(height: 4),
+            Text(title,
+                style: const TextStyle(fontSize: 11, color: Colors.white60)),
           ],
         ),
       ),
     );
   }
 }
+
 
 // ---------------------------------------------------------------------------
 // 2.5. REGISTER SCREEN (HARBİCİ KAYIT EKRANI)
@@ -1286,6 +1394,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _passwordConfirmController = TextEditingController();
   bool _isLoading = false;
+
+  final List<String> _schools = [
+    'Albay Tayyar Lisesi',
+    'Balıkesir Lisesi',
+    'Sırrı Yırcalı Anadolu Lisesi (FEKAL)',
+    'Adnan Menderes Lisesi',
+    'Rahmi Kula Anadolu Lisesi (RKAL)',
+    'İstanbulluoğlu Sosyal Bilimler Lisesi (İSBL)'
+  ];
+  String _selectedSchool = 'Balıkesir Lisesi';
 
   void _register() async {
     if (_formKey.currentState!.validate()) {
@@ -1319,6 +1437,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         tc: tc,
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
+        schoolName: _selectedSchool,
       );
 
       // Datastore'a kaydet
@@ -1395,6 +1514,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // OKUL SEÇİMİ EKLENDİ
+                        DropdownButtonFormField<String>(
+                          value: _selectedSchool,
+                          decoration: const InputDecoration(labelText: 'Okulunuz', prefixIcon: Icon(Icons.school)),
+                          items: _schools.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 14)))).toList(),
+                          onChanged: (val) {
+                            if (val != null) setState(() => _selectedSchool = val);
+                          },
                         ),
                         const SizedBox(height: 16),
 
@@ -2696,6 +2826,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
         securityAnswer: _securityAnswerController.text,
         rewardAmount: _rewardController.text,
         isUrgent: _isUrgent, // Acil İlan
+        schoolName: DataStore.currentUser?.schoolName ?? 'Belirtilmedi',
       );
 
       await DataStore.addListing(newListing);
