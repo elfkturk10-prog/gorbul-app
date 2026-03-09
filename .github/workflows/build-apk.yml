@@ -31,16 +31,6 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
-      - name: Configure App Icon
-        run: |
-          cat <<EOF >> pubspec.yaml
-          flutter_launcher_icons:
-            android: "launcher_icon"
-            ios: false
-            image_path: "assets/icon/app_icon.png"
-          EOF
-          dart run flutter_launcher_icons || true
-
       - name: Configure Android & Firebase
         run: |
           # Android altyapısını oluştur (eksikse)
