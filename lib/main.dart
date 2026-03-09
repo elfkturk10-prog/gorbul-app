@@ -1430,13 +1430,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Bildirim Paneli (Phase 11)
   void _showNotificationsPanel(BuildContext context) {
-    final notifications = [
-      {'icon': Icons.location_on, 'color': Colors.red, 'title': 'Yakınınızda Yeni Kayıp!', 'body': 'Kadıköy bölgesinde yeni bir kayıp telefon ilanı yayınlandı.', 'time': '2 dk önce'},
-      {'icon': Icons.thumb_up, 'color': Colors.green, 'title': 'Eşleşme Bulundu!', 'body': 'Kayıp cüzdan ilanınız için potansiyel bir eşleşme var.', 'time': '15 dk önce'},
-      {'icon': Icons.star, 'color': Colors.amber, 'title': 'Yeni Rozet Kazandın!', 'body': '"Hızlı Melek" rozeti profiline eklendi.', 'time': '1 saat önce'},
-      {'icon': Icons.chat_bubble, 'color': Colors.blue, 'title': 'Yeni Mesaj', 'body': 'Ahmet sana ilan hakkında mesaj gönderdi.', 'time': '3 saat önce'},
-      {'icon': Icons.verified_user, 'color': Colors.teal, 'title': 'Hesabın Onaylandı!', 'body': 'T.C. Kimlik doğrulamanız başarıyla tamamlandı.', 'time': 'Dün'},
-    ];
+    final List<Map<String, dynamic>> notifications = [];
 
     showModalBottomSheet(
       context: context,
@@ -1458,24 +1452,26 @@ class _HomeScreenState extends State<HomeScreen> {
               const Text('Bildirimler', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Expanded(
-                child: ListView.separated(
-                  controller: controller,
-                  itemCount: notifications.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
-                  itemBuilder: (_, index) {
-                    final n = notifications[index];
-                    return ListTile(
-                      leading: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: (n['color'] as Color).withOpacity(0.1), shape: BoxShape.circle),
-                        child: Icon(n['icon'] as IconData, color: n['color'] as Color, size: 22),
-                      ),
-                      title: Text(n['title'] as String, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                      subtitle: Text(n['body'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
-                      trailing: Text(n['time'] as String, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                    );
-                  },
-                ),
+                child: notifications.isEmpty
+                  ? const Center(child: Text('Henüz yeni bir bildiriminiz yok.', style: TextStyle(color: Colors.grey)))
+                  : ListView.separated(
+                      controller: controller,
+                      itemCount: notifications.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+                      itemBuilder: (_, index) {
+                        final n = notifications[index];
+                        return ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(color: (n['color'] as Color).withOpacity(0.1), shape: BoxShape.circle),
+                            child: Icon(n['icon'] as IconData, color: n['color'] as Color, size: 22),
+                          ),
+                          title: Text(n['title'] as String, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          subtitle: Text(n['body'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                          trailing: Text(n['time'] as String, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                        );
+                      },
+                    ),
               ),
             ],
           ),
@@ -1645,11 +1641,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(
                       children: [
-                        Expanded(child: _buildLiveStatCard('Bugün Kayıp', '${DataStore.listings.where((l) => l.isUrgent).length + 18}', Icons.search_off, Colors.redAccent)),
+                        Expanded(child: _buildLiveStatCard('Bugün Kayıp', '${DataStore.listings.where((l) => l.isUrgent).length}', Icons.search_off, Colors.redAccent)),
                         const SizedBox(width: 12),
-                        Expanded(child: _buildLiveStatCard('Bulundu', '${DataStore.listings.length + 7}', Icons.task_alt, Colors.green)),
+                        Expanded(child: _buildLiveStatCard('Bulundu', '${DataStore.listings.length}', Icons.task_alt, Colors.green)),
                         const SizedBox(width: 12),
-                        Expanded(child: _buildLiveStatCard('Mutlu Son', '${DataStore.listings.length + 3}', Icons.favorite, Colors.pink)),
+                        Expanded(child: _buildLiveStatCard('Mutlu Son', '0', Icons.favorite, Colors.pink)),
                       ],
                     ),
                   ),
@@ -4841,12 +4837,9 @@ class LeaderboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> heroes = [
-      {'name': 'Ahmet Y.', 'score': 1250, 'rank': 'Altın Koruyucu', 'finds': 12, 'color': Colors.amber},
-      {'name': 'Ayşe K.', 'score': 980, 'rank': 'Gümüş Dedektif', 'finds': 8, 'color': Colors.grey[400]},
-      {'name': 'Mehmet T.', 'score': 850, 'rank': 'Bronz İzci', 'finds': 7, 'color': Colors.brown[300]},
-      {'name': DataStore.currentUser?.name ?? 'Kaan R.', 'score': 320, 'rank': 'Çaylak', 'finds': 2, 'color': Colors.blueGrey},
-    ];
+    final List<Map<String, dynamic>> heroes = DataStore.currentUser != null ? [
+      {'name': DataStore.currentUser!.name, 'score': 0, 'rank': 'Yeni Katılımcı', 'finds': 0, 'color': Colors.blueGrey},
+    ] : [];
 
     return Scaffold(
       appBar: AppBar(
