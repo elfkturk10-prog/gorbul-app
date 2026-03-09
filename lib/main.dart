@@ -7,6 +7,9 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 // Not: google_fonts eklenirse: import 'package:google_fonts/google_fonts.dart';
 
 // ---------------------------------------------------------------------------
@@ -14,8 +17,15 @@ import 'package:path_provider/path_provider.dart';
 // ---------------------------------------------------------------------------
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase (Yönetici Firebase hesabı bağladığında çalışır)
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    print("Firebase initialization failed or not configured yet: $e");
+  }
 
-  // Initialize Persistent Storage
+  // Initialize Persistent Storage (Cloud/Local)
   await DataStore.init();
 
   // Status bar rengini ayarla (Banka ciddiyeti)
@@ -361,10 +371,17 @@ class DataStore {
         registeredUsers = jsonList.map((j) => User.fromJson(j)).toList();
       }
 
-      final listingsFile = await _getFile('listings.json');
-      if (await listingsFile.exists()) {
-        final List<dynamic> jsonList = jsonDecode(await listingsFile.readAsString());
-        listings = jsonList.map((j) => Listing.fromJson(j)).toList();
+      // LISTINGS INIT WITH FIREBASE FALLBACK
+      try {
+        final snapshot = await FirebaseFirestore.instance.collection('listings').get();
+        listings = snapshot.docs.map((doc) => Listing.fromJson(doc.data())).toList();
+      } catch (e) {
+        print("Firebase listings error, falling back to local: $e");
+        final listingsFile = await _getFile('listings.json');
+        if (await listingsFile.exists()) {
+          final List<dynamic> jsonList = jsonDecode(await listingsFile.readAsString());
+          listings = jsonList.map((j) => Listing.fromJson(j)).toList();
+        }
       }
 
       final favsFile = await _getFile('favorites.json');
@@ -473,7 +490,16 @@ class DataStore {
 
   static Future<void> addListing(Listing listing) async {
     listings.insert(0, listing);
+    
+    // Yerele her ihtimale karşı yedekle
     await _saveListings();
+    
+    // Firebase'e de yazmaya çalış (Bağlıysa tüm dünyaya anında yansır)
+    try {
+      await FirebaseFirestore.instance.collection('listings').doc(listing.id).set(listing.toJson());
+    } catch (e) {
+      print("Firebase save error: $e");
+    }
   }
 
   static Future<void> toggleFavorite(String listingId) async {

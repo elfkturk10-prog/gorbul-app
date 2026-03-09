@@ -16,6 +16,9 @@ dependencies:
   intl: any
   path_provider: any
   firebase_core: any
+  cloud_firestore: any
+  firebase_storage: any
+  firebase_auth: any
   geolocator: ^13.0.2
   http: any
 
