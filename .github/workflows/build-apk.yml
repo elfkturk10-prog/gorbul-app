@@ -32,7 +32,15 @@ jobs:
         run: flutter pub get
         
       - name: Configure App Icon
-        run: dart run flutter_launcher_icons
+        run: |
+          # Sadece android'i aktifleştirip ios'u iptal eden config dosyasini pubspec'e ekle
+          cat <<EOF >> pubspec.yaml
+          flutter_launcher_icons:
+            android: "launcher_icon"
+            ios: false
+            image_path: "assets/icon/app_icon.png"
+          EOF
+          dart run flutter_launcher_icons
 
       - name: Rename App to GörBul
         run: |

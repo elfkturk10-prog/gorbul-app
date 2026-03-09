@@ -2231,6 +2231,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
   bool _isCompressing = false;
   bool _isAnalyzing = false;
   List<String> _aiTags = [];
+  bool _isUrgent = false;
   
   // Yeni Redesign State Variables
   int _currentStep = 0;
@@ -2454,6 +2455,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
         securityQuestion: _securityQuestionController.text,
         securityAnswer: _securityAnswerController.text,
         rewardAmount: _rewardController.text,
+        isUrgent: _isUrgent,
       );
 
       await DataStore.addListing(newListing);
@@ -2863,6 +2865,20 @@ class _AddListingScreenState extends State<AddListingScreen> {
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 24),
+        
+        // Acil İlan Alanı
+        SwitchListTile(
+          title: const Text('Bu bir acil durumdur', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+          subtitle: const Text('Evcil hayvan, yaşlı, hayati ilaç vb. durumlarda işaretleyin. İlan kırmızı çerçeve ile öne çıkar.'),
+          value: _isUrgent,
+          activeColor: Colors.red,
+          onChanged: (val) {
+             setState(() => _isUrgent = val);
+          },
+          secondary: const Icon(Icons.warning_rounded, color: Colors.red),
+          contentPadding: EdgeInsets.zero,
         ),
         const SizedBox(height: 24),
 
@@ -3526,8 +3542,8 @@ class ProfileScreen extends StatelessWidget {
                         Icon(Icons.person, size: 50, color: Color(0xFF0A1F44)),
                   ),
                   const SizedBox(height: 16),
-                  const Text('Ahmet Kaan R.',
-                      style: TextStyle(
+                  Text(DataStore.currentUser?.name ?? 'Ahmet Kaan R.',
+                      style: const TextStyle(
                           color: Colors.white,
                           fontSize: 24,
                           fontWeight: FontWeight.bold)),
@@ -3538,7 +3554,7 @@ class ProfileScreen extends StatelessWidget {
                       Icon(Icons.verified,
                           color: Colors.tealAccent[400], size: 18),
                       const SizedBox(width: 4),
-                      Text('T.C. Kimlik Doğrulanmış (123*****789)',
+                      Text(DataStore.currentUser != null ? 'T.C. Kimlik Doğrulanmış (${DataStore.currentUser!.tcKimlik.substring(0,3)}*****)' : 'T.C. Kimlik Doğrulanmış (123*****789)',
                           style: TextStyle(
                               color: Colors.white.withOpacity(0.8),
                               fontSize: 13)),
@@ -3554,9 +3570,9 @@ class ProfileScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: Row(
                 children: [
-                  Expanded(child: _buildStatCard('Eşleşen', '4', context)),
+                  Expanded(child: _buildStatCard('Dijital Dolap', '${DataStore.vaultItems.length}', context)),
                   const SizedBox(width: 16),
-                  Expanded(child: _buildStatCard('Yayında', '2', context)),
+                  Expanded(child: _buildStatCard('Yayında', '${DataStore.listings.length}', context)),
                   const SizedBox(width: 16),
                   Expanded(
                       child: _buildStatCard('Güven Skoru', '100', context)),
@@ -4819,7 +4835,7 @@ class LeaderboardScreen extends StatelessWidget {
       {'name': 'Ahmet Y.', 'score': 1250, 'rank': 'Altın Koruyucu', 'finds': 12, 'color': Colors.amber},
       {'name': 'Ayşe K.', 'score': 980, 'rank': 'Gümüş Dedektif', 'finds': 8, 'color': Colors.grey[400]},
       {'name': 'Mehmet T.', 'score': 850, 'rank': 'Bronz İzci', 'finds': 7, 'color': Colors.brown[300]},
-      {'name': 'Kaan R.', 'score': 320, 'rank': 'Çaylak', 'finds': 2, 'color': Colors.blueGrey},
+      {'name': DataStore.currentUser?.name ?? 'Kaan R.', 'score': 320, 'rank': 'Çaylak', 'finds': 2, 'color': Colors.blueGrey},
     ];
 
     return Scaffold(
@@ -4855,7 +4871,7 @@ class LeaderboardScreen extends StatelessWidget {
               itemCount: heroes.length,
               itemBuilder: (context, index) {
                 final hero = heroes[index];
-                final isMe = hero['name'] == 'Kaan R.';
+                final isMe = hero['name'] == (DataStore.currentUser?.name ?? 'Kaan R.');
                 
                 return Card(
                   elevation: isMe ? 4 : 1,
