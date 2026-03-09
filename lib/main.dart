@@ -18,30 +18,19 @@ void main() async {
   // Initialize Persistent Storage
   await DataStore.init();
 
-  // Determine initial screen
-  Widget initialScreen;
-  if (!DataStore.hasSeenOnboarding) {
-    initialScreen = const OnboardingScreen();
-  } else if (!DataStore.isLoggedIn) {
-    initialScreen = const SplashScreen(); // Veya direkt LoginScreen()
-  } else {
-    initialScreen = const MainScreen(); // Oturum açıksa vitrine gönder
-  }
-
   // Status bar rengini ayarla (Banka ciddiyeti)
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
-  runApp(GorBulApp(initialScreen: initialScreen));
+  runApp(const GorBulApp());
 }
 
 // ---------------------------------------------------------------------------
 // APP CONFIG & THEME
 // ---------------------------------------------------------------------------
 class GorBulApp extends StatelessWidget {
-  final Widget initialScreen;
-  const GorBulApp({super.key, required this.initialScreen});
+  const GorBulApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +43,7 @@ class GorBulApp extends StatelessWidget {
       themeMode: ThemeMode.system, // Otomatik Dark/Light
       theme: _buildTheme(Brightness.light, primaryColor),
       darkTheme: _buildTheme(Brightness.dark, primaryColor),
-      home: initialScreen,
+      home: const SplashScreen(),
     );
   }
 
@@ -667,7 +656,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     onPressed: () {
                       if (_currentPage == onboardingData.length - 1) {
                         DataStore.setHasSeenOnboarding(true); // Artık bir daha görmesin
-                        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const SplashScreen()));
+                        Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
                       } else {
                         _pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeIn);
                       }
@@ -733,11 +722,19 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
-    // 3 Saniye sonra Login ekranına geçiş
+    // 3 Saniye sonra durum kontrolü yaparak geçiş
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
-        Navigator.pushReplacement(context,
-            MaterialPageRoute(builder: (context) => const LoginScreen()));
+        if (!DataStore.hasSeenOnboarding) {
+          Navigator.pushReplacement(context,
+              MaterialPageRoute(builder: (context) => const OnboardingScreen()));
+        } else if (!DataStore.isLoggedIn) {
+          Navigator.pushReplacement(context,
+              MaterialPageRoute(builder: (context) => const LoginScreen()));
+        } else {
+          Navigator.pushReplacement(context,
+              MaterialPageRoute(builder: (context) => const MainScreen()));
+        }
       }
     });
   }
@@ -2378,6 +2375,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
   bool _isLocating = false;
   double? _currentLat;
   double? _currentLng;
+  bool _isUrgent = false;
 
   Future<void> _fetchCurrentLocation() async {
     bool permitted = await AppUtils.requestEducationalPermission(
@@ -2455,7 +2453,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
         securityQuestion: _securityQuestionController.text,
         securityAnswer: _securityAnswerController.text,
         rewardAmount: _rewardController.text,
-        isUrgent: _isUrgent,
+        isUrgent: _isUrgent, // Acil İlan
       );
 
       await DataStore.addListing(newListing);
@@ -2472,96 +2470,93 @@ class _AddListingScreenState extends State<AddListingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title:
-            const Text('Yeni İlan Ver', style: TextStyle(letterSpacing: 1.0)),
+        title: const Text('Yeni İlan Ver', style: TextStyle(letterSpacing: 1.0, fontWeight: FontWeight.bold)),
         elevation: 0,
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white,
         foregroundColor: Theme.of(context).primaryColor,
+        centerTitle: true,
       ),
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.grey[100], // Modern gri zemin
       body: Form(
         key: _formKey,
-        child: Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(primary: Theme.of(context).primaryColor),
-          ),
-          child: Stepper(
-            type: StepperType.vertical,
-            currentStep: _currentStep,
-            onStepContinue: () {
-              if (_currentStep < 2) {
-                setState(() => _currentStep += 1);
-              } else {
-                _submitListing();
-              }
-            },
-            onStepCancel: () {
-              if (_currentStep > 0) {
-                setState(() => _currentStep -= 1);
-              }
-            },
-            controlsBuilder: (context, details) {
-              return Padding(
-                padding: const EdgeInsets.only(top: 24.0),
-                child: Row(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 1. Görsel Kartı
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: details.onStepContinue,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).primaryColor,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: Text(
-                          _currentStep == 2 ? 'YAYINLA' : 'DEVAM ET',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                    if (_currentStep > 0) ...[
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: details.onStepCancel,
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: const Text('GERİ', style: TextStyle(fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                    ]
+                    const Text('Fotoğraf & Yapay Zeka', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    _buildStep1ImageAndAI(context),
                   ],
                 ),
-              );
-            },
-            steps: [
-              // ADIM 1: GÖRSEL VE YAPAY ZEKA
-              Step(
-                title: const Text('Görsel ve Yapay Zeka', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Eşyanın en fazla 5 fotoğrafını ekleyin'),
-                isActive: _currentStep >= 0,
-                state: _currentStep > 0 ? StepState.complete : StepState.indexed,
-                content: _buildStep1ImageAndAI(context),
               ),
+              const SizedBox(height: 16),
 
-              // ADIM 2: KATEGORİ VE KONUM
-              Step(
-                title: const Text('Kategori ve Konum', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Eşya nerede, nedir?'),
-                isActive: _currentStep >= 1,
-                state: _currentStep > 1 ? StepState.complete : StepState.indexed,
-                content: _buildStep2CategoryAndLocation(context),
+              // 2. Kategori ve Konum Kartı
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('İlan Detayları', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    _buildStep2CategoryAndLocation(context),
+                  ],
+                ),
               ),
+              const SizedBox(height: 16),
 
-              // ADIM 3: GÜVENLİK VE ÖDÜL
-              Step(
-                title: const Text('Güvenlik Çemberi ve Ödül', style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: const Text('Kötü niyetli kişilerden korunun'),
-                isActive: _currentStep >= 2,
-                content: _buildStep3SecurityAndReward(context),
+              // 3. Güvenlik ve Ödül Kartı
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Özellikler & Güvenlik', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    _buildStep3SecurityAndReward(context),
+                  ],
+                ),
               ),
+              
+              const SizedBox(height: 32),
+              
+              // 4. Gönder Butonu
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  onPressed: _submitListing,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 4,
+                  ),
+                  child: const Text('İlanı Güvenle Yayınla', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                ),
+              ),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -2855,16 +2850,30 @@ class _AddListingScreenState extends State<AddListingScreen> {
               TextFormField(
                 controller: _rewardController,
                 decoration: InputDecoration(
-                  labelText: 'Ödül Miktarı (Opsiyonel)',
-                  hintText: 'Örn: 500 TL veya Hediye Çeki',
-                  prefixIcon: const Icon(Icons.card_giftcard),
-                  filled: true,
-                  fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    labelText: 'Ödül Miktarı (Opsiyonel)',
+                    hintText: 'Örn: 500 TL veya Hediye Çeki',
+                    prefixIcon: const Icon(Icons.card_giftcard),
+                    filled: true,
+                    fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                 ),
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 24),
+
+        // Acil İlan Alanı
+        SwitchListTile(
+          title: const Text('Bu bir acil durumdur', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+          subtitle: const Text('Evcil hayvan, yaşlı, hayati ilaç vb. durumlarda işaretleyin. İlan kırmızı çerçeve ile öne çıkar.'),
+          value: _isUrgent,
+          activeColor: Colors.red,
+          onChanged: (val) {
+             setState(() => _isUrgent = val);
+          },
+          secondary: const Icon(Icons.warning_rounded, color: Colors.red),
+          contentPadding: EdgeInsets.zero,
         ),
         const SizedBox(height: 24),
         
