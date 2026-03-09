@@ -1,4 +1,4 @@
-name: Build and Release Flutter APK
+name: Build and Release GörBul APK
 
 on:
   push:
@@ -9,70 +9,93 @@ on:
 
 jobs:
   build:
-    name: Build APK
+    name: Build & Release Universal APK
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        
+
       - name: Setup Java
         uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '17'
-          
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.3'
           channel: 'stable'
-          
+
       - name: Get Dependencies
         run: flutter pub get
-        
+
       - name: Configure App Icon
         run: |
-          # Sadece android'i aktifleştirip ios'u iptal eden config dosyasini pubspec'e ekle
           cat <<EOF >> pubspec.yaml
           flutter_launcher_icons:
             android: "launcher_icon"
             ios: false
             image_path: "assets/icon/app_icon.png"
           EOF
-          dart run flutter_launcher_icons
+          dart run flutter_launcher_icons || true
 
-      - name: Configure Target App & Firebase
+      - name: Configure Android & Firebase
         run: |
-          # Eksik Android altyapısını yeniden oluştur
+          # Android altyapısını oluştur (eksikse)
           flutter create . --platforms=android || true
-          
-          # App ismini düzelt
+
+          # Uygulama adını düzelt
           sed -i 's/android:label="gorbul"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
           sed -i 's/android:label="görbultaslak1"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
 
-          # settings.gradle (Modern Flutter plugins) içerisine google-services ekle
+          # Firebase Google Services enjekte et (settings.gradle - modern Flutter)
           sed -i 's/id "dev.flutter.flutter-plugin-loader" version "1.0.0"/id "dev.flutter.flutter-plugin-loader" version "1.0.0"\n    id "com.google.gms.google-services" version "4.4.1" apply false/' android/settings.gradle || true
-          
-          # android/app/build.gradle dosyasındaki plugins kismine google-services ekle
           sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/' android/app/build.gradle || true
-          
-          # build.gradle (Eski Flutter tarzı varsa)
-          sed -i 's/dependencies {/dependencies {\n        classpath "com.google.gms:google-services:4.4.1"/' android/build.gradle || true
+
+          # Eski Flutter proje yapısı (apply plugin yöntemi)
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle || true
+          sed -i 's/dependencies {/dependencies {\n        classpath "com.google.gms:google-services:4.4.1"/' android/build.gradle || true
 
-          # Multidex ve MinSdkVersion (Firestore hatasını engellemek için)
+          # MinSdkVersion: Firebase en az 23 istiyor
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
-          
-          # minSdkVersion eger 21 falansa her halükarda 23 yapalim
           sed -i 's/minSdkVersion 21/minSdkVersion 23/' android/app/build.gradle || true
-          
-      - name: Build APK
-        run: flutter build apk --release
+          sed -i 's/minSdkVersion 22/minSdkVersion 23/' android/app/build.gradle || true
 
-        
-      - name: Upload APK
+      # Her Android mimarisi (arm32, arm64, x86_64) için APK üret
+      - name: Build Universal APK (All Architectures)
+        run: |
+          flutter build apk --release \
+            --target-platform android-arm,android-arm64,android-x64
+
+      - name: Get Version Tag
+        id: version
+        run: echo "tag=v$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
+
+      # GitHub Release olarak yayınla
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "GörBul APK - ${{ steps.version.outputs.tag }}"
+          body: |
+            ## GörBul - Kayıp Eşya Ağı
+
+            Her Android cihazla uyumlu evrensel APK (arm32 + arm64 + x86_64)
+
+            **Kurulum:**
+            1. `app-release.apk` dosyasını indirin
+            2. Telefonunuzda *Bilinmeyen kaynaklar*'a izin verin
+            3. Yükleyin ve açın!
+          files: build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Ayrıca artifact olarak da yükle (fallback)
+      - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk
+          name: gorbul-universal-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
