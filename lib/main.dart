@@ -15,7 +15,71 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:crypto/crypto.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 // Not: google_fonts eklenirse: import 'package:google_fonts/google_fonts.dart';
+
+// Arka plan mesaj işleyicisi (FCM için şart)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print("Background message received: ${message.messageId}");
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATION SERVICE (BİLDİRİM YÖNETİMİ)
+// ---------------------------------------------------------------------------
+class NotificationService {
+  static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+
+  static Future<void> init() async {
+    final messaging = FirebaseMessaging.instance;
+
+    // İzin İste
+    await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    // Token al (Sunucuya göndermek için hazır bekler)
+    String? token = await messaging.getToken();
+    print("FCM Token: $token");
+
+    // Local Notifications Ayarları
+    const androidSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
+    const initSettings = InitializationSettings(android: androidSettings);
+    await _localNotifications.initialize(initSettings);
+
+    // Ön Plan Mesajları (Uygulama açıkken gelenleri lokale çevir)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if (message.notification != null) {
+        showLocalNotification(
+          message.notification!.title ?? 'Yeni Mesaj',
+          message.notification!.body ?? '',
+        );
+      }
+    });
+  }
+
+  static Future<void> showLocalNotification(String title, String body) async {
+    const androidDetails = AndroidNotificationDetails(
+      'gorbul_core_channel',
+      'GörBul Bildirimleri',
+      channelDescription: 'Bu kanal uygulama içi önemli uyarılar içindir.',
+      importance: Importance.max,
+      priority: Priority.high,
+      ticker: 'ticker',
+    );
+    const notificationDetails = NotificationDetails(android: androidDetails);
+    await _localNotifications.show(
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      title,
+      body,
+      notificationDetails,
+    );
+  }
+}
 
 // SHA-256 şifre hash yardımcısı (güvenlik)
 String hashPassword(String raw) {
@@ -32,6 +96,12 @@ void main() async {
   // Initialize Firebase (Yönetici Firebase hesabı bağladığında çalışır)
   try {
     await Firebase.initializeApp();
+    
+    // Background Handler Set
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    
+    // Notification Service Init
+    await NotificationService.init();
   } catch (e) {
     print("Firebase initialization failed or not configured yet: $e");
   }
@@ -539,6 +609,13 @@ class DataStore {
   static Future<void> addVaultItem(VaultItem item) async {
     vaultItems.add(item);
     await saveVaultItems();
+    
+    // OTOMATİK BİLDİRİM
+    NotificationService.showLocalNotification(
+      'Kasa Güncellendi 🔒',
+      '${item.name} başarıyla Dijital Dolaba eklendi.',
+    );
+
     try {
       if (currentUser != null) {
         await FirebaseFirestore.instance
@@ -586,6 +663,12 @@ class DataStore {
   static Future<void> addListing(Listing listing) async {
     listings.insert(0, listing);
     
+    // OTOMATİK BİLDİRİM
+    NotificationService.showLocalNotification(
+      'İlan Yayında! 🚀',
+      '${listing.title} ilanınız başarıyla oluşturuldu ve yayına alındı.',
+    );
+
     // Yerele her ihtimale karşı yedekle
     await _saveListings();
     
@@ -5831,6 +5914,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       'lastMessageAt': now,
     });
 
+    // OTOMATİK BİLDİRİM (Mesaj Gönderildi Onayı)
+    NotificationService.showLocalNotification(
+      'Mesaj Gönderildi ✅',
+      '${widget.otherUserName} kullanıcısına mesajınız iletildi.',
+    );
+
     // Scroll'u aşağı kaydır
     Future.delayed(const Duration(milliseconds: 200), () {
       if (_scrollController.hasClients) {
@@ -6130,6 +6219,13 @@ class _PortalAnnouncementScreenState extends State<PortalAnnouncementScreen> {
     };
     try {
       await FirebaseFirestore.instance.collection('announcements').add(data);
+      
+      // OTOMATİK BİLDİRİM
+      NotificationService.showLocalNotification(
+        'Yeni Duyuru! 📢',
+        '$_myPortal topluluğu için yeni bir duyuru yayınlandı.',
+      );
+
       await _loadAnnouncements();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));

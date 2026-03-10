@@ -25,6 +25,8 @@ dependencies:
   latlong2: any
   url_launcher: any
   crypto: any
+  firebase_messaging: any
+  flutter_local_notifications: any
 
 dev_dependencies:
   flutter_test:
