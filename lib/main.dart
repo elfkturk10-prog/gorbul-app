@@ -32,10 +32,14 @@ void main() async {
   // Initialize Persistent Storage (Cloud/Local)
   await DataStore.init();
 
-  // Status bar rengini ayarla (Banka ciddiyeti)
+  // Tam ekran (Edge-to-Edge) - alttaki navbar uygulama üstüne gelmesin
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
   ));
   runApp(const GorBulApp());
 }
