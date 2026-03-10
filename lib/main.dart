@@ -4063,13 +4063,36 @@ class DetailScreen extends StatelessWidget {
                           ),
                         ),
                         OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (context) =>
-                                      ChatDetailScreen(userName: listing.ownerName, chatName: listing.title)),
-                            );
+                          onPressed: () async {
+                            final me = DataStore.currentUser;
+                            if (me == null) return;
+                            final otherId = listing.ownerId;
+                            if (otherId == me.id) return;
+
+                            // Deterministik chatId (iki kullanıcı arasında hep aynı)
+                            final ids = [me.id, otherId]..sort();
+                            final chatId = '${ids[0]}_${ids[1]}';
+
+                            final chatRef = FirebaseFirestore.instance.collection('chats').doc(chatId);
+                            final chatSnap = await chatRef.get();
+                            if (!chatSnap.exists) {
+                              await chatRef.set({
+                                'participants': [me.id, otherId],
+                                'participantNames': [me.name, listing.ownerName],
+                                'lastMessage': '',
+                                'lastMessageAt': Timestamp.now(),
+                              });
+                            }
+
+                            if (context.mounted) {
+                              Navigator.push(context, MaterialPageRoute(
+                                builder: (_) => ChatDetailScreen(
+                                  chatId: chatId,
+                                  otherUserName: listing.ownerName,
+                                  otherUserId: otherId,
+                                ),
+                              ));
+                            }
                           },
                           icon: const Icon(Icons.chat_bubble_outline,
                               size: 16, color: Color(0xFF0A1F44)),
@@ -4769,71 +4792,141 @@ class _RadarMatchDialogState extends State<RadarMatchDialog>
 // ---------------------------------------------------------------------------
 // 7. CHAT (MESSAGES) SCREEN
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 7. MESSAGES SCREEN (FİREBASE GERÇEK ZAMANLI)
+// ---------------------------------------------------------------------------
 class MessagesScreen extends StatelessWidget {
   const MessagesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final myId = DataStore.currentUser?.id ?? '';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mesajlar', style: TextStyle(letterSpacing: 1.0)),
         elevation: 0,
       ),
-      body: ListView.separated(
-        itemCount: DataStore.chats.length,
-        separatorBuilder: (context, index) =>
-            const Divider(height: 1, indent: 70),
-        itemBuilder: (context, index) {
-          // <-- EKSİK OLAN KISIM BURASIYDI EKLENDİ
-          final chat = DataStore.chats[index];
-          return ListTile(
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: CircleAvatar(
-              radius: 28,
-              backgroundImage: NetworkImage(chat.avatarUrl),
-            ),
-            title: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(chat.name,
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16)),
-                Text(chat.time,
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-              ],
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 4.0),
-              child: Text(
-                chat.lastMessage,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.grey[600]),
+      body: Column(
+        children: [
+          // 30 gün silme banner'ı
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            color: Colors.amber.shade100,
+            child: Row(children: [
+              const Icon(Icons.timer_outlined, size: 14, color: Colors.orange),
+              const SizedBox(width: 6),
+              Text(
+                'Mesajlar 30 günde otomatik silinir',
+                style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
               ),
+            ]),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('chats')
+                  .where('participants', arrayContains: myId)
+                  .orderBy('lastMessageAt', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.chat_bubble_outline, size: 72, color: Colors.grey[300]),
+                        const SizedBox(height: 16),
+                        Text('Henüz mesajın yok.',
+                            style: TextStyle(color: Colors.grey[500], fontSize: 15)),
+                        const SizedBox(height: 8),
+                        Text('İlan sayfasından birine mesaj gönder.',
+                            style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                      ],
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  itemCount: docs.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 70),
+                  itemBuilder: (context, i) {
+                    final data = docs[i].data() as Map<String, dynamic>;
+                    final chatId = docs[i].id;
+                    final List parts = data['participantNames'] ?? [];
+                    final otherName = parts.firstWhere(
+                      (n) => n != (DataStore.currentUser?.name ?? ''),
+                      orElse: () => 'Kullanıcı',
+                    );
+                    final lastMsg = data['lastMessage'] ?? '';
+                    final lastAt = (data['lastMessageAt'] as Timestamp?)?.toDate();
+                    final timeStr = lastAt != null
+                        ? '${lastAt.hour}:${lastAt.minute.toString().padLeft(2, '0')}'
+                        : '';
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      leading: CircleAvatar(
+                        radius: 28,
+                        backgroundColor: Theme.of(context).primaryColor,
+                        child: Text(
+                          otherName.isNotEmpty ? otherName[0].toUpperCase() : '?',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                        ),
+                      ),
+                      title: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(otherName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(timeStr, style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                        ],
+                      ),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(lastMsg,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.grey[600])),
+                      ),
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => ChatDetailScreen(
+                            chatId: chatId,
+                            otherUserName: otherName,
+                            otherUserId: (data['participants'] as List)
+                                .firstWhere((id) => id != myId, orElse: () => ''),
+                          ),
+                        ));
+                      },
+                    );
+                  },
+                );
+              },
             ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => ChatDetailScreen(userName: chat.name, chatName: 'Genel Sohbet')),
-              );
-            },
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// 7.5. CHAT DETAIL SCREEN (MOCK SOHBET İÇİ)
+// 7.5. CHAT DETAIL SCREEN (FİREBASE GERÇEK ZAMANLI)
 // ---------------------------------------------------------------------------
 class ChatDetailScreen extends StatefulWidget {
-  final String userName;
-  final String chatName; // İlan adı veya konusu
-  
-  const ChatDetailScreen({super.key, required this.userName, required this.chatName});
+  final String chatId;
+  final String otherUserName;
+  final String otherUserId;
+
+  const ChatDetailScreen({
+    super.key,
+    required this.chatId,
+    required this.otherUserName,
+    required this.otherUserId,
+  });
 
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
@@ -4841,125 +4934,144 @@ class ChatDetailScreen extends StatefulWidget {
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _msgController = TextEditingController();
-  late ChatPreview currentChat;
+  final ScrollController _scrollController = ScrollController();
 
-  @override
-  void initState() {
-    super.initState();
-    // Sohbeti bul veya yarat
-    int index = DataStore.chats.indexWhere((c) => c.name == widget.userName);
-    if (index == -1) {
-      currentChat = ChatPreview(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: widget.userName,
-        lastMessage: 'Merhaba! ${widget.chatName} ilanı için yazıyorum.',
-        time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}',
-        avatarUrl: 'https://via.placeholder.com/150',
-        messages: [
-           ChatMessage(text: 'Merhaba! ${widget.chatName} ilanı için yazıyorum.', isMe: true, time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}')
-        ],
-      );
-      DataStore.chats.add(currentChat);
-      DataStore.saveChats();
-    } else {
-      currentChat = DataStore.chats[index];
-    }
-  }
+  Future<void> _sendMessage() async {
+    final text = _msgController.text.trim();
+    if (text.isEmpty) return;
+    _msgController.clear();
 
-  void _sendMessage() {
-    if (_msgController.text.trim().isEmpty) return;
-    String text = _msgController.text;
-    String time = '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}';
-    
-    setState(() {
-      currentChat.messages.add(ChatMessage(
-          text: text,
-          isMe: true,
-          time: time));
-      _msgController.clear();
+    final me = DataStore.currentUser;
+    final now = Timestamp.now();
+    final expiry = Timestamp.fromDate(DateTime.now().add(const Duration(days: 30)));
+
+    final msgData = {
+      'senderId': me?.id ?? '',
+      'senderName': me?.name ?? 'Ben',
+      'text': text,
+      'createdAt': now,
+      'expiryAt': expiry,
+    };
+
+    final chatRef = FirebaseFirestore.instance.collection('chats').doc(widget.chatId);
+
+    // Mesajı ekle
+    await chatRef.collection('messages').add(msgData);
+
+    // Chat önizlemesini güncelle
+    await chatRef.update({
+      'lastMessage': text,
+      'lastMessageAt': now,
     });
-    
-    // Chat lastMessage güncelle
-    int index = DataStore.chats.indexOf(currentChat);
-    if(index != -1) {
-       DataStore.chats[index] = ChatPreview(
-           id: currentChat.id, 
-           name: currentChat.name, 
-           lastMessage: text, 
-           time: time, 
-           avatarUrl: currentChat.avatarUrl, 
-           messages: currentChat.messages
-       );
-    }
-    DataStore.saveChats();
+
+    // Scroll'u aşağı kaydır
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final myId = DataStore.currentUser?.id ?? '';
+    final now = Timestamp.now();
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.userName, style: const TextStyle(fontSize: 16)),
-            Text(widget.chatName, style: const TextStyle(fontSize: 12, color: Colors.white70)),
-          ]
+            Text(widget.otherUserName, style: const TextStyle(fontSize: 16)),
+            const Text('Doğrudan Mesaj', style: TextStyle(fontSize: 11, color: Colors.white70)),
+          ],
         ),
-        actions: [
-          IconButton(icon: const Icon(Icons.info_outline), onPressed: () {}), // <-- Boş butonlara bir yenisi eklenmişti önceden, şimdilik böyle
-        ],
       ),
       backgroundColor: Colors.grey[100],
       body: Column(
         children: [
+          // 30 gün banner
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            color: Colors.amber.shade100,
+            child: Row(children: [
+              const Icon(Icons.timer_outlined, size: 13, color: Colors.orange),
+              const SizedBox(width: 6),
+              Text('Bu sohbet 30 günde otomatik silinir',
+                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800)),
+            ]),
+          ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: currentChat.messages.length,
-              itemBuilder: (context, index) {
-                final msg = currentChat.messages[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Align(
-                    alignment:
-                        msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: msg.isMe
-                            ? Theme.of(context).primaryColor
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(16).copyWith(
-                          bottomRight:
-                              msg.isMe ? const Radius.circular(0) : null,
-                          bottomLeft:
-                              !msg.isMe ? const Radius.circular(0) : null,
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('chats')
+                  .doc(widget.chatId)
+                  .collection('messages')
+                  .where('expiryAt', isGreaterThan: now)
+                  .orderBy('expiryAt')
+                  .orderBy('createdAt')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final msgs = snapshot.data?.docs ?? [];
+                if (msgs.isEmpty) {
+                  return const Center(
+                    child: Text('Henüz mesaj yok.\nİlk mesajı sen gönder! 👋',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey)),
+                  );
+                }
+                return ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: msgs.length,
+                  itemBuilder: (context, i) {
+                    final m = msgs[i].data() as Map<String, dynamic>;
+                    final isMe = m['senderId'] == myId;
+                    final createdAt = (m['createdAt'] as Timestamp?)?.toDate();
+                    final timeStr = createdAt != null
+                        ? '${createdAt.hour}:${createdAt.minute.toString().padLeft(2, '0')}'
+                        : '';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Align(
+                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isMe ? Theme.of(context).primaryColor : Colors.white,
+                            borderRadius: BorderRadius.circular(16).copyWith(
+                              bottomRight: isMe ? const Radius.circular(0) : null,
+                              bottomLeft: !isMe ? const Radius.circular(0) : null,
+                            ),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                            children: [
+                              Text(m['text'] ?? '',
+                                  style: TextStyle(
+                                      color: isMe ? Colors.white : Colors.black87, fontSize: 15)),
+                              const SizedBox(height: 4),
+                              Text(timeStr,
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: isMe ? Colors.white70 : Colors.grey)),
+                            ],
+                          ),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 5)
-                        ],
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(msg.text,
-                              style: TextStyle(
-                                  color: msg.isMe
-                                      ? Colors.white
-                                      : Colors.black87)),
-                          const SizedBox(height: 4),
-                          Text(msg.time,
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color:
-                                      msg.isMe ? Colors.white70 : Colors.grey)),
-                        ],
-                      ),
-                    ),
-                  ),
+                    );
+                  },
                 );
               },
             ),
@@ -4972,6 +5084,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 Expanded(
                   child: TextField(
                     controller: _msgController,
+                    textCapitalization: TextCapitalization.sentences,
                     decoration: InputDecoration(
                       hintText: 'Mesaj yazın...',
                       filled: true,
@@ -4980,9 +5093,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide.none,
                       ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     ),
+                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 8),
