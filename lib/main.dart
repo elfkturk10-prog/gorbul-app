@@ -1770,10 +1770,11 @@ class _MainScreenState extends State<MainScreen> {
 
   List<Widget> get _pages => [
     HomeScreen(onNavigateToTab: _onNavigateToTab),
-    const GlobalMapScreen(), // Yeni Eklenen Harita Sayfası
-    AddListingScreen(onListingAdded: _onListingCreated), // Callback eklendi
-    const MessagesScreen(), // Mesajlar sayfası
-    const ProfileScreen(), // Profil sayfası
+    const GlobalMapScreen(),
+    AddListingScreen(onListingAdded: _onListingCreated),
+    const PortalAnnouncementScreen(), // Duyuru Panosu
+    const MessagesScreen(),
+    const ProfileScreen(),
   ];
 
   @override
@@ -1833,6 +1834,8 @@ class _MainScreenState extends State<MainScreen> {
                 icon: Icon(Icons.map_outlined), label: 'Harita'),
             BottomNavigationBarItem(
                 icon: Icon(Icons.add_circle_outline), label: 'İlan Ver'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.campaign_outlined), label: 'Pano'),
             BottomNavigationBarItem(
                 icon: Icon(Icons.chat_bubble_outline), label: 'Mesajlar'),
             BottomNavigationBarItem(
@@ -2223,21 +2226,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      // Yeni Radar Butonu ve GörBul AI
+      // Radar Butonu
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          FloatingActionButton.extended(
-            heroTag: 'ai_assistant',
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const AiAssistantScreen()));
-            },
-            backgroundColor: Colors.purple,
-            icon: const Icon(Icons.auto_awesome, color: Colors.white),
-            label: const Text('GörBul AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(height: 16),
           FloatingActionButton.extended(
             heroTag: 'radar_btn',
             onPressed: () {
@@ -5042,177 +5035,190 @@ class GlobalMapScreen extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // 9. GÖRBUL AI (AKILLI ASİSTAN) SCREEN
 // ---------------------------------------------------------------------------
-class AiAssistantScreen extends StatefulWidget {
-  const AiAssistantScreen({super.key});
+class PortalAnnouncementScreen extends StatefulWidget {
+  const PortalAnnouncementScreen({super.key});
 
   @override
-  State<AiAssistantScreen> createState() => _AiAssistantScreenState();
+  State<PortalAnnouncementScreen> createState() => _PortalAnnouncementScreenState();
 }
 
-class _AiAssistantScreenState extends State<AiAssistantScreen> {
-  final TextEditingController _msgController = TextEditingController();
-  final List<ChatMessage> _messages = [];
-  bool _isTyping = false;
+class _PortalAnnouncementScreenState extends State<PortalAnnouncementScreen> {
+  List<Map<String, dynamic>> _announcements = [];
+  bool _isLoading = true;
+
+  String get _myPortal => DataStore.currentUser?.schoolName ?? '';
+  bool get _isManager => DataStore.currentUser?.isManager ?? false;
 
   @override
   void initState() {
     super.initState();
-    _messages.add(ChatMessage(
-      text: 'Merhaba! Ben GörBul AI 🤖.\nNeyini kaybettiğini veya ne bulduğunu bana doğal bir dille anlatabilirsin. Senin için ilana dönüştürebilirim.',
-      isMe: false,
-      time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
-    ));
+    _loadAnnouncements();
   }
 
-  void _sendMessage() async {
-    if (_msgController.text.trim().isEmpty) return;
-    
-    final userText = _msgController.text;
-    setState(() {
-      _messages.add(ChatMessage(text: userText, isMe: true, time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'));
-      _msgController.clear();
-      _isTyping = true;
-    });
-
-    if (_AddListingScreenState.geminiApiKey == "BURAYA_API_ANAHTARINIZI_GIRIN" || _AddListingScreenState.geminiApiKey.isEmpty || _AddListingScreenState.geminiApiKey.startsWith("AIzaSyCDbO6")) {
-        await Future.delayed(const Duration(seconds: 2));
-        setState(() {
-          _isTyping = false;
-          _messages.add(ChatMessage(
-            text: 'Merhaba, API Anahtarınız bulunmadığı için şu anda simülasyon modundayım. Söylediğiniz: "$userText"',
-            isMe: false,
-            time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
-          ));
-        });
-        return;
-    }
-
+  Future<void> _loadAnnouncements() async {
+    setState(() => _isLoading = true);
     try {
-      final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${_AddListingScreenState.geminiApiKey}');
-      final prompt = "Sen GörBul adlı bir kayıp eşya uygulamasının yapay zeka asistanısın. Kısa, yardımsever ve arkadaşça cevap ver. Kullanıcının mesajı şu: $userText";
-      
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "contents": [{
-            "parts": [{"text": prompt}]
-          }]
-        }),
-      );
-      
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final responseText = data['candidates'][0]['content']['parts'][0]['text'] as String;
-
-        if (mounted) {
-          setState(() {
-            _isTyping = false;
-            _messages.add(ChatMessage(
-              text: responseText,
-              isMe: false,
-              time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
-            ));
-          });
-        }
-      } else {
-        throw Exception("API Hatası: ${response.statusCode}");
-      }
+      final snap = await FirebaseFirestore.instance
+          .collection('announcements')
+          .where('schoolName', isEqualTo: _myPortal)
+          .orderBy('date', descending: true)
+          .get();
+      setState(() {
+        _announcements = snap.docs.map((d) => {...d.data(), 'docId': d.id}).toList();
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-           _isTyping = false;
-           _messages.add(ChatMessage(
-             text: 'Bir hata oluştu: $e',
-             isMe: false,
-             time: '${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
-           ));
-        });
-      }
+      // Offline veya indeks hatası - sessizce geç
+    } finally {
+      setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _addAnnouncement(String content) async {
+    if (content.trim().isEmpty) return;
+    final data = {
+      'schoolName': _myPortal,
+      'content': content.trim(),
+      'authorName': DataStore.currentUser?.name ?? 'Yönetici',
+      'date': DateTime.now().toIso8601String(),
+    };
+    try {
+      await FirebaseFirestore.instance.collection('announcements').add(data);
+      await _loadAnnouncements();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    }
+  }
+
+  Future<void> _deleteAnnouncement(String docId) async {
+    try {
+      await FirebaseFirestore.instance.collection('announcements').doc(docId).delete();
+      await _loadAnnouncements();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Silinemedi: $e')));
+    }
+  }
+
+  void _showComposeDialog() {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('$_myPortal Portali - Yeni Duyuru'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 4,
+          decoration: InputDecoration(
+            hintText: 'Duyuru metni...',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('İptal')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _addAnnouncement(ctrl.text);
+            },
+            child: const Text('Yayınla'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GörBul AI', style: TextStyle(letterSpacing: 1.0)),
-        backgroundColor: Colors.purple,
+        title: Text('$_myPortal - Duyurular', style: const TextStyle(letterSpacing: 0.5)),
         elevation: 0,
-      ),
-      backgroundColor: Colors.white,
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                final isMe = _messages[index].isMe;
-                return Align(
-                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isMe ? Theme.of(context).primaryColor : Colors.purple.withOpacity(0.1),
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(16),
-                        topRight: const Radius.circular(16),
-                        bottomLeft: isMe ? const Radius.circular(16) : Radius.zero,
-                        bottomRight: isMe ? Radius.zero : const Radius.circular(16),
-                      ),
-                    ),
-                    child: Text(
-                      _messages[index].text,
-                      style: TextStyle(color: isMe ? Colors.white : Colors.black87),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-          if (_isTyping)
-             const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('GörBul AI yazıyor...', style: TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic)),
-                )
-             ),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _msgController,
-                    decoration: InputDecoration(
-                      hintText: 'Kaybını yapay zekaya anlat...',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  backgroundColor: Colors.purple,
-                  child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white),
-                    onPressed: _sendMessage,
-                  ),
-                )
-              ],
-            ),
-          )
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadAnnouncements),
         ],
       ),
+      floatingActionButton: _isManager
+          ? FloatingActionButton.extended(
+              heroTag: 'new_announcement',
+              onPressed: _showComposeDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Duyuru Ekle'),
+            )
+          : null,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _announcements.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.campaign_outlined, size: 72, color: Colors.grey[300]),
+                      const SizedBox(height: 16),
+                      Text(
+                        _isManager
+                            ? 'Henüz duyuru yok.\nSağ alttaki butona basarak ilk duyuruyu ekle!'
+                            : 'Henüz duyuru yok.\nYönetici bir şey paylaştığında burada görünecek.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey[500], fontSize: 15),
+                      ),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadAnnouncements,
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _announcements.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final a = _announcements[index];
+                      final date = a['date'] != null
+                          ? DateTime.tryParse(a['date'])
+                          : null;
+                      final dateStr = date != null
+                          ? '${date.day}.${date.month}.${date.year} ${date.hour}:${date.minute.toString().padLeft(2,'0')}'
+                          : '';
+                      return Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.campaign, color: Colors.indigo, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      a['authorName'] ?? 'Yönetici',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    ),
+                                  ),
+                                  if (_isManager)
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                                      onPressed: () => _deleteAnnouncement(a['docId']),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(a['content'] ?? '', style: const TextStyle(fontSize: 15)),
+                              const SizedBox(height: 8),
+                              Text(dateStr, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
     );
   }
 }
+
 
 class MockMapScreen extends StatefulWidget {
   final Listing listing;
