@@ -2846,6 +2846,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
     }
   }
 
+  bool _isUploading = false;
+
   void _submitListing() async {
     if (_formKey.currentState!.validate()) {
       if (_selectedImages.isEmpty) {
@@ -2853,6 +2855,24 @@ class _AddListingScreenState extends State<AddListingScreen> {
           const SnackBar(content: Text('Lütfen en az bir fotoğraf ekleyin!')),
         );
         return;
+      }
+
+      setState(() => _isUploading = true);
+
+      String downloadUrl = '';
+      try {
+        // Trendyol gibi Firebase Storage'a yükle ki herkes görsün!
+        final storageRef = FirebaseStorage.instance.ref();
+        final imageRef = storageRef.child('listing_images/${DateTime.now().millisecondsSinceEpoch}.jpg');
+        
+        await imageRef.putFile(_selectedImages.first);
+        downloadUrl = await imageRef.getDownloadURL();
+      } catch (e) {
+        if (mounted) {
+          setState(() => _isUploading = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Resim yükleme hatası: $e')));
+        }
+        return; 
       }
 
       // İlanı Oluştur ve Store'a Ekle
@@ -2863,7 +2883,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
         latitude: _currentLat,
         longitude: _currentLng,
         date: DateTime.now(),
-        imageFile: _selectedImages.first, // Gerçek DB'de ilk fotoğraf (_selectedImages.first) kullanılır
+        imageUrl: downloadUrl, // Artık sadece URL var, herkes webden çekecek
+        imageFile: _selectedImages.first, // Yerelde fallback
         securityQuestion: _securityQuestionController.text,
         securityAnswer: _securityAnswerController.text,
         rewardAmount: _rewardController.text,
@@ -2875,11 +2896,13 @@ class _AddListingScreenState extends State<AddListingScreen> {
 
       await DataStore.addListing(newListing);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('İlan başarıyla yayınlandı!')),
-      );
-
-      Navigator.pop(context);
+      if (mounted) {
+        setState(() => _isUploading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('İlan başarıyla buluta yüklendi ve yayınlandı!')),
+        );
+        Navigator.pop(context);
+      }
     }
   }
 
