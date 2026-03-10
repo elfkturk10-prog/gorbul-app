@@ -142,6 +142,7 @@ class User {
   final String email;
   final String password;
   final String schoolName;
+  final bool isManager;
 
   User({
     required this.id,
@@ -151,6 +152,7 @@ class User {
     required this.email,
     required this.password,
     required this.schoolName,
+    this.isManager = false,
   });
 
   Map<String, dynamic> toJson() {
@@ -162,6 +164,7 @@ class User {
       'email': email,
       'password': password,
       'schoolName': schoolName,
+      'isManager': isManager,
     };
   }
 
@@ -174,6 +177,7 @@ class User {
       email: json['email'] ?? '',
       password: json['password'] ?? '',
       schoolName: json['schoolName'] ?? 'Belirtilmedi',
+      isManager: json['isManager'] ?? false,
     );
   }
 }
@@ -193,6 +197,7 @@ class Listing {
   final String ownerName;
   final String rewardAmount;
   final String schoolName;
+  final String ownerId;
 
   Listing({
     required this.id,
@@ -209,6 +214,7 @@ class Listing {
     this.ownerName = 'Anonim Kullanıcı',
     this.rewardAmount = '',
     this.schoolName = 'Belirtilmedi',
+    required this.ownerId,
   });
 
   Map<String, dynamic> toJson() {
@@ -227,6 +233,7 @@ class Listing {
       'ownerName': ownerName,
       'rewardAmount': rewardAmount,
       'schoolName': schoolName,
+      'ownerId': ownerId,
     };
   }
 
@@ -246,6 +253,7 @@ class Listing {
       ownerName: json['ownerName'] ?? 'Anonim Kullanıcı',
       rewardAmount: json['rewardAmount'] ?? '',
       schoolName: json['schoolName'] ?? 'Belirtilmedi',
+      ownerId: json['ownerId'] ?? '',
     );
   }
 }
@@ -507,6 +515,17 @@ class DataStore {
       await FirebaseFirestore.instance.collection('listings').doc(listing.id).set(listing.toJson());
     } catch (e) {
       print("Firebase save error: $e");
+    }
+  }
+
+  static Future<void> removeListing(String listingId) async {
+    listings.removeWhere((l) => l.id == listingId);
+    await _saveListings();
+
+    try {
+      await FirebaseFirestore.instance.collection('listings').doc(listingId).delete();
+    } catch (e) {
+      print("Firebase delete error: $e");
     }
   }
 
@@ -1055,19 +1074,9 @@ class ManagerLoginScreen extends StatefulWidget {
 }
 
 class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
-  final _codeController = TextEditingController();
+  final _tcController = TextEditingController();
+  final _passwordController = TextEditingController();
   bool _isLoading = false;
-
-  // Okul portal kodları (kısaltma bazlı, yılsız)
-  // Kod -> Okul Adı eşleştirmesi
-  static const Map<String, String> schoolPortalCodes = {
-    'ATL':   'Albay Tayyar Lisesi',
-    'BL':    'Balıkesir Lisesi',
-    'FEKAL': 'Sırrı Yırcalı Anadolu Lisesi (FEKAL)',
-    'AML':   'Adnan Menderes Lisesi',
-    'RKAL':  'Rahmi Kula Anadolu Lisesi (RKAL)',
-    'ISBL':  'İstanbulluoğlu Sosyal Bilimler Lisesi (İSBL)',
-  };
 
   void _loginManager() async {
     setState(() => _isLoading = true);
@@ -1076,20 +1085,40 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
     if (!mounted) return;
     setState(() => _isLoading = false);
 
-    String inputCode = _codeController.text.trim().toUpperCase();
-    String? schoolName = schoolPortalCodes[inputCode];
+    String tc = _tcController.text.trim();
+    String password = _passwordController.text.trim();
 
-    if (schoolName != null) {
+    User? manager;
+    try {
+      manager = DataStore.registeredUsers.firstWhere(
+          (u) => u.tc == tc && u.password == password);
+    } catch (e) {
+      manager = null;
+    }
+
+    if (manager != null) {
+      if (!manager.isManager) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bu hesap bir yönetici/öğretmen hesabı değil!'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      await DataStore.setLoggedIn(true, user: manager);
+      
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ManagerDashboardScreen(schoolName: schoolName),
+          builder: (context) => ManagerDashboardScreen(schoolName: manager!.schoolName),
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Geçersiz Portal Kodu! Lütfen okul kodunuzu doğru girin.'),
+          content: Text('Hatalı T.C. Kimlik No veya Şifre!'),
           backgroundColor: Colors.red,
         ),
       );
@@ -1106,7 +1135,7 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
         foregroundColor: Colors.white,
       ),
       body: Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1114,26 +1143,38 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
               const Icon(Icons.account_balance, size: 80, color: Colors.blueGrey),
               const SizedBox(height: 20),
               const Text(
-                'Okul Yöneticisi Doğrulaması',
+                'Yönetici Doğrulaması',
                 style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Okulunuza özel portal kodunu girin.',
+                'Sisteme kayıtlı TC Kimlik No ve Şifrenizi girin.',
                 style: TextStyle(color: Colors.white54, fontSize: 13),
               ),
               const SizedBox(height: 32),
               TextField(
-                controller: _codeController,
-                obscureText: true,
-                textCapitalization: TextCapitalization.characters,
+                controller: _tcController,
+                keyboardType: TextInputType.number,
+                maxLength: 11,
                 style: const TextStyle(color: Colors.white, letterSpacing: 2),
                 decoration: const InputDecoration(
-                  labelText: 'Portal Kodu (Kısaltma)',
+                  labelText: 'T.C. Kimlik No',
                   labelStyle: TextStyle(color: Colors.blueGrey),
-                  hintText: 'Örn: ATL, BL, FEKAL...',
-                  hintStyle: TextStyle(color: Colors.white24),
-                  prefixIcon: Icon(Icons.key, color: Colors.blueGrey),
+                  prefixIcon: Icon(Icons.perm_identity, color: Colors.blueGrey),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
+                  focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
+                  counterText: "",
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _passwordController,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white, letterSpacing: 2),
+                decoration: const InputDecoration(
+                  labelText: 'Şifre',
+                  labelStyle: TextStyle(color: Colors.blueGrey),
+                  prefixIcon: Icon(Icons.lock, color: Colors.blueGrey),
                   enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.blueGrey)),
                   focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.lightBlueAccent)),
                 ),
@@ -1165,25 +1206,30 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
 // ---------------------------------------------------------------------------
 // 2.2 MANAGER DASHBOARD SCREEN (MÜDÜR ALANI)
 // ---------------------------------------------------------------------------
-class ManagerDashboardScreen extends StatelessWidget {
+class ManagerDashboardScreen extends StatefulWidget {
   final String schoolName;
   const ManagerDashboardScreen({super.key, required this.schoolName});
 
   @override
+  State<ManagerDashboardScreen> createState() => _ManagerDashboardScreenState();
+}
+
+class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
+  @override
   Widget build(BuildContext context) {
     // SADECE bu okulun ilanlarını filtrele
     final myListings = DataStore.listings
-        .where((l) => l.schoolName == schoolName)
+        .where((l) => l.schoolName == widget.schoolName)
         .toList();
     final myUsers = DataStore.registeredUsers
-        .where((u) => u.schoolName == schoolName)
+        .where((u) => u.schoolName == widget.schoolName)
         .toList();
     final urgentCount = myListings.where((l) => l.isUrgent).length;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1B2A),
       appBar: AppBar(
-        title: Text(schoolName, style: const TextStyle(fontSize: 16)),
+        title: Text(widget.schoolName, style: const TextStyle(fontSize: 16)),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         actions: [
@@ -1238,9 +1284,29 @@ class ManagerDashboardScreen extends StatelessWidget {
                               listing.location,
                               style: const TextStyle(color: Colors.white54, fontSize: 12),
                             ),
-                            trailing: Text(
-                              listing.date.toString().substring(0, 10),
-                              style: const TextStyle(color: Colors.white38, fontSize: 11),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.redAccent),
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (c) => AlertDialog(
+                                    title: const Text('İlanı Sil'),
+                                    content: const Text('Bu ilanı tamamen silmek istediğinizden emin misiniz?'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('İptal')),
+                                      TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sil', style: TextStyle(color: Colors.red))),
+                                    ],
+                                  ),
+                                );
+
+                                if (confirm == true) {
+                                  await DataStore.removeListing(listing.id);
+                                  setState(() {});
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İlan silindi'), backgroundColor: Colors.green));
+                                  }
+                                }
+                              },
                             ),
                           ),
                         );
@@ -1291,17 +1357,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _passwordConfirmController = TextEditingController();
+  final _schoolNameController = TextEditingController();
+  
   bool _isLoading = false;
+  bool _isTeacher = false; // Yönetici/Öğretmen mi?
+  List<String> _dynamicSchools = [];
+  String? _selectedSchool;
 
-  final List<String> _schools = [
-    'Albay Tayyar Lisesi',
-    'Balıkesir Lisesi',
-    'Sırrı Yırcalı Anadolu Lisesi (FEKAL)',
-    'Adnan Menderes Lisesi',
-    'Rahmi Kula Anadolu Lisesi (RKAL)',
-    'İstanbulluoğlu Sosyal Bilimler Lisesi (İSBL)'
-  ];
-  String _selectedSchool = 'Balıkesir Lisesi';
+  @override
+  void initState() {
+    super.initState();
+    _loadDynamicSchools();
+  }
+
+  void _loadDynamicSchools() {
+    // Sadece Teacher/Manager olarak kayıtlı kullanıcıların okullarını benzersiz olarak topla
+    final schools = DataStore.registeredUsers
+        .where((u) => u.isManager && u.schoolName.isNotEmpty)
+        .map((u) => u.schoolName)
+        .toSet()
+        .toList();
+    
+    setState(() {
+      _dynamicSchools = schools;
+      if (_dynamicSchools.isNotEmpty) {
+        _selectedSchool = _dynamicSchools.first;
+      }
+    });
+  }
 
   void _register() async {
     if (_formKey.currentState!.validate()) {
@@ -1327,6 +1410,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
         return;
       }
 
+      // Eğer öğretmen değilse okul listesinden seçim yapması zorunlu
+      if (!_isTeacher && (_dynamicSchools.isEmpty || _selectedSchool == null)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Kayıtlı okul bulunamadı! Önce okul yöneticinizin sisteme kayıt olması gerekmektedir.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      String userSchoolName = _isTeacher ? _schoolNameController.text.trim() : _selectedSchool!;
+
       // Yeni kullanıcı oluştur
       User newUser = User(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -1335,7 +1431,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         tc: tc,
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
-        schoolName: _selectedSchool,
+        schoolName: userSchoolName,
+        isManager: _isTeacher,
       );
 
       // Datastore'a kaydet
@@ -1415,15 +1512,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // OKUL SEÇİMİ EKLENDİ
-                        DropdownButtonFormField<String>(
-                          value: _selectedSchool,
-                          decoration: const InputDecoration(labelText: 'Okulunuz', prefixIcon: Icon(Icons.school)),
-                          items: _schools.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 14)))).toList(),
+                        // YÖNETİCİ/ÖĞRETMEN SEÇİMİ (DINAMIK OKUL İÇİN)
+                        SwitchListTile(
+                          title: const Text('Yönetici / Öğretmen Kaydı', style: TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: const Text('Kendi okul portalınızı oluşturun', style: TextStyle(fontSize: 12)),
+                          value: _isTeacher,
+                          activeColor: const Color(0xFF0A1F44),
                           onChanged: (val) {
-                            if (val != null) setState(() => _selectedSchool = val);
+                            setState(() {
+                              _isTeacher = val;
+                            });
                           },
                         ),
+                        const SizedBox(height: 8),
+
+                        // OKUL KISMI (Duruma göre dinamik)
+                        _isTeacher 
+                          ? TextFormField(
+                              controller: _schoolNameController,
+                              decoration: const InputDecoration(labelText: 'Okulunuzun Tam Adı (Panel Oluşturulacak)', prefixIcon: Icon(Icons.school)),
+                              validator: (v) => v!.isEmpty ? 'Okul adı belirlemeniz gerekli' : null,
+                            )
+                          : _dynamicSchools.isEmpty 
+                            ? Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                                child: const Text(
+                                  'Sisteme kayıtlı okul bulunamadı. Lütfen yöneticinizin portal açmasını bekleyin.',
+                                  style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                                  textAlign: TextAlign.center,
+                                ),
+                              )
+                            : DropdownButtonFormField<String>(
+                                value: _selectedSchool,
+                                decoration: const InputDecoration(labelText: 'Okulunuz (Mevcut Portallar)', prefixIcon: Icon(Icons.school)),
+                                items: _dynamicSchools.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 14)))).toList(),
+                                onChanged: (val) {
+                                  if (val != null) setState(() => _selectedSchool = val);
+                                },
+                              ),
                         const SizedBox(height: 16),
 
                         // TC KİMLİK (Senin Algoritmanla Korunuyor)
@@ -2725,6 +2852,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
         rewardAmount: _rewardController.text,
         isUrgent: _isUrgent, // Acil İlan
         schoolName: DataStore.currentUser?.schoolName ?? 'Belirtilmedi',
+        ownerId: DataStore.currentUser?.id ?? 'bilinmiyor',
+        ownerName: '${DataStore.currentUser?.name} ${DataStore.currentUser?.surname}',
       );
 
       await DataStore.addListing(newListing);
@@ -3387,6 +3516,33 @@ class DetailScreen extends StatelessWidget {
                   });
                 },
               ),
+              if (DataStore.currentUser != null &&
+                  (DataStore.currentUser!.id == listing.ownerId ||
+                   (DataStore.currentUser!.isManager && DataStore.currentUser!.schoolName == listing.schoolName)))
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.redAccent),
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (c) => AlertDialog(
+                        title: const Text('İlanı Sil'),
+                        content: const Text('Bu ilanı silmek istediğinizden emin misiniz?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('İptal')),
+                          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sil', style: TextStyle(color: Colors.red))),
+                        ],
+                      ),
+                    );
+
+                    if (confirm == true) {
+                      await DataStore.removeListing(listing.id);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İlan başarıyla silindi.'), backgroundColor: Colors.green));
+                        Navigator.pop(context); // Go back to Home
+                      }
+                    }
+                  },
+                ),
               IconButton(
                 icon: const Icon(Icons.share),
                 onPressed: () {
