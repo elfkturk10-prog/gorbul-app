@@ -371,23 +371,6 @@ class DataStore {
 
   static Future<void> init() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      bool hasReset = prefs.getBool('has_reset_v2') ?? false;
-
-      if (!hasReset) {
-        // Eski sahte kalıntıları silmek için bir defalık HARD RESET
-         final dir = await getApplicationDocumentsDirectory();
-         final filesToDel = ['prefs.json', 'users.json', 'listings.json', 'favorites.json', 'chats.json', 'vaults.json'];
-         for(var f in filesToDel) {
-            var file = File('${dir.path}/$f');
-            if (await file.exists()) {
-              await file.delete();
-            }
-         }
-         await prefs.setBool('has_reset_v2', true);
-         // Reset sonrası baştan başlatır gibi temiz başlıyoruz.
-      }
-
       final prefsFile = await _getFile('prefs.json');
       if (await prefsFile.exists()) {
         final data = jsonDecode(await prefsFile.readAsString());
