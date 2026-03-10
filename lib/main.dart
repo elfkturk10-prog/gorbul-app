@@ -55,29 +55,75 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (message.notification != null) {
         showLocalNotification(
-          message.notification!.title ?? 'Yeni Mesaj',
+          message.notification!.title ?? 'GörBul Uyarı',
           message.notification!.body ?? '',
+          payload: 'fcm_msg',
         );
       }
     });
+
+    // İlk açılışta bir "Hoş geldin" bildirimi (Opsiyonel, etkileşim artırır)
+    _scheduleEngagementReminder();
   }
 
-  static Future<void> showLocalNotification(String title, String body) async {
+  static Future<void> showLocalNotification(String title, String body, {String? payload}) async {
     const androidDetails = AndroidNotificationDetails(
-      'gorbul_core_channel',
-      'GörBul Bildirimleri',
-      channelDescription: 'Bu kanal uygulama içi önemli uyarılar içindir.',
+      'gorbul_high_importance_channel',
+      'GörBul Önemli Bildirimler',
+      channelDescription: 'Bu kanal uygulama içi kritik ve anlık uyarılar içindir.',
       importance: Importance.max,
       priority: Priority.high,
-      ticker: 'ticker',
+      playBadge: true,
+      enableVibration: true,
     );
     const notificationDetails = NotificationDetails(android: androidDetails);
     await _localNotifications.show(
-      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      Random().nextInt(100000),
       title,
       body,
       notificationDetails,
+      payload: payload,
     );
+  }
+
+  // Akıllı Etkileşim Bildirimleri (Kullanıcıyı uygulamaya çeker)
+  static void _scheduleEngagementReminder() {
+    final engagementMessages = [
+      ["Bir şey mi kaybettin? 🔍", "GörBul'a hemen bak, belki birisi eşyanı bulmuştur!"],
+      ["İyilik yap, izi kalsın! 🤝", "Çevrendeki yeni ilanlara bakarak birilerine yardım edebilirsin."],
+      ["Dijital Kasan Güncel mi? 🔒", "Değerli eşyalarını kasaya eklemeyi unutma, kaybolursa anında ilan verebilirsin."],
+      ["Gözün yolda kalmasın... 🌈", "GörBul topluluğu senin için taranıyor. Yeni ilanları kontrol ettin mi?"],
+      ["Küçük Bir Hatırlatma 💡", "Kayıp eşyanı bulduysan ilanı 'Çözüldü' olarak işaretlemeyi unutma!"],
+      ["Güvenlik Önemlidir! 🛡️", "T.C. No maskeleme özelliğini aktif ederek verilerini daha güvenli tutabilirsin."],
+    ];
+
+    // Belirli aralıklarla (Simülasyon) rastgele mesaj atar
+    Future.delayed(const Duration(minutes: 30), () {
+      final msg = engagementMessages[Random().nextInt(engagementMessages.length)];
+      showLocalNotification(msg[0], msg[1], payload: 'engagement');
+    });
+  }
+
+  // Kritik Durum Bildirimi (Kullanıcı etkileşimine göre)
+  static void sendActionNotification(String actionType, String detail) {
+    String title = "GörBul İşlem Onayı";
+    String body = detail;
+
+    switch (actionType) {
+      case 'safety':
+        title = "Güvenlik Uyarısı 🛡️";
+        body = "Hesabınızda yeni bir güvenlik ayarı yapıldı.";
+        break;
+      case 'match':
+        title = "Yapay Zeka Eşleşmesi! ✨";
+        body = "Kaybettiğin eşyaya benzer bir ilan bulundu, hemen kontrol et!";
+        break;
+      case 'reward':
+        title = "Ödüllü İlan Yakında! 💰";
+        body = "Çevrende ödüllü bir ilan yayınlandı, bir göz atmak ister misin?";
+        break;
+    }
+    showLocalNotification(title, body, payload: actionType);
   }
 }
 
@@ -543,6 +589,14 @@ class DataStore {
 
       chats = [];
 
+      // SİSTEM HAZIR BİLDİRİMİ (Sadece giriş yapılmışsa)
+      if (isLoggedIn) {
+        NotificationService.showLocalNotification(
+          'GörBul Çevrimiçi 🌐',
+          'Tüm verileriniz senkronize edildi, güvenli ağa bağlısınız.',
+        );
+      }
+
     } catch (e) {
       print("DataStore init error: $e");
     }
@@ -647,12 +701,24 @@ class DataStore {
       currentUser = user;
     }
     await _savePrefs();
+    
+    if (value) {
+      NotificationService.showLocalNotification(
+        'Sisteme Giriş Yapıldı ✅',
+        'GörBul ağına başarıyla bağlandınız.',
+      );
+    }
   }
   
   static Future<void> logout() async {
     isLoggedIn = false;
     currentUser = null;
     await _savePrefs();
+    
+    NotificationService.showLocalNotification(
+      'Güvenli Çıkış Yapıldı 🚪',
+      'Verileriniz cihazınızda güvenli bir şekilde saklanıyor.',
+    );
   }
 
   static Future<void> setHasSeenOnboarding(bool value) async {
@@ -1183,6 +1249,13 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
       if (user != null) {
         await DataStore.setLoggedIn(true, user: user);
+        
+        // HOŞ GELDİN BİLDİRİMİ
+        NotificationService.showLocalNotification(
+          'Tekrar Hoş Geldin! 👋',
+          '${user.name}, GörBul ailesine tekrar hoş geldin. Senin için tarama yapıyoruz!',
+        );
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MainScreen()),
@@ -1786,6 +1859,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       // Datastore'a kaydet
       await DataStore.registerUser(newUser);
+
+      // HOŞ GELDİN BİLDİRİMİ
+      NotificationService.showLocalNotification(
+        'GörBul Ailesine Hoş Geldin! ✨',
+        '${newUser.name}, kaydın başarıyla tamamlandı. Artık güvenli ağın bir parçasısın!',
+      );
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -5313,7 +5392,10 @@ class ProfileScreen extends StatelessWidget {
                           title: const Text('Gizlilik'),
                           subtitle: const Text('Verilerinizi yönetin', style: TextStyle(fontSize: 11)),
                           contentPadding: EdgeInsets.zero,
-                          onTap: () {},
+                          onTap: () {
+                            NotificationService.sendActionNotification('safety', 'Gizlilik ayarlarınız güncellendi.');
+                            Navigator.pop(ctx);
+                          },
                         ),
                       ],
                     ),
@@ -5714,6 +5796,11 @@ class _RadarMatchDialogState extends State<RadarMatchDialog>
                       fontWeight: FontWeight.bold,
                       color: Colors.green)),
               const SizedBox(height: 16),
+              // OTOMATİK BİLDİRİM (Radar Eşleşmesi)
+              Builder(builder: (context) {
+                NotificationService.sendActionNotification('match', 'Yeşil Anahtarlık ile %95 eşleşme bulundu!');
+                return const SizedBox.shrink();
+              }),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const CircleAvatar(
