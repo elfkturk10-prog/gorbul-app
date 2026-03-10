@@ -21,6 +21,8 @@ dependencies:
   firebase_auth: any
   geolocator: ^13.0.2
   http: any
+  flutter_map: any
+  latlong2: any
 
 dev_dependencies:
   flutter_test:

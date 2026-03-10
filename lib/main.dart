@@ -10,6 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:permission_handler/permission_handler.dart';
 // Not: google_fonts eklenirse: import 'package:google_fonts/google_fonts.dart';
 
 // ---------------------------------------------------------------------------
@@ -189,6 +192,7 @@ class Listing {
   final double? latitude;
   final double? longitude;
   final DateTime date;
+  final DateTime expiryDate; // 15 gün sonra otomatik silinir
   final String imageUrl; // Dosya yolu veya URL
   final File? imageFile; // Yerel test için
   final String securityQuestion;
@@ -206,6 +210,7 @@ class Listing {
     this.latitude,
     this.longitude,
     required this.date,
+    DateTime? expiryDate,
     this.imageUrl = '',
     this.imageFile,
     required this.securityQuestion,
@@ -215,7 +220,7 @@ class Listing {
     this.rewardAmount = '',
     this.schoolName = 'Belirtilmedi',
     required this.ownerId,
-  });
+  }) : expiryDate = expiryDate ?? date.add(const Duration(days: 15));
 
   Map<String, dynamic> toJson() {
     return {
@@ -225,6 +230,7 @@ class Listing {
       'latitude': latitude,
       'longitude': longitude,
       'date': date.toIso8601String(),
+      'expiryDate': expiryDate.toIso8601String(),
       'imageUrl': imageUrl,
       'imageFilePath': imageFile?.path,
       'securityQuestion': securityQuestion,
@@ -238,13 +244,15 @@ class Listing {
   }
 
   factory Listing.fromJson(Map<String, dynamic> json) {
+    final createdDate = json['date'] != null ? DateTime.parse(json['date']) : DateTime.now();
     return Listing(
       id: json['id'] ?? '',
       title: json['title'] ?? '',
       location: json['location'] ?? '',
       latitude: json['latitude'],
       longitude: json['longitude'],
-      date: json['date'] != null ? DateTime.parse(json['date']) : DateTime.now(),
+      date: createdDate,
+      expiryDate: json['expiryDate'] != null ? DateTime.parse(json['expiryDate']) : createdDate.add(const Duration(days: 15)),
       imageUrl: json['imageUrl'] ?? '',
       imageFile: json['imageFilePath'] != null ? File(json['imageFilePath']) : null,
       securityQuestion: json['securityQuestion'] ?? '',
@@ -411,6 +419,13 @@ class DataStore {
       if (await favsFile.exists()) {
         final List<dynamic> jsonList = jsonDecode(await favsFile.readAsString());
         favoriteListingIds = jsonList.map((j) => j.toString()).toList();
+      }
+
+      // 15 günden eski ilanları Firebase'den ve yerelden sil
+      final now = DateTime.now();
+      final expiredListings = listings.where((l) => now.isAfter(l.expiryDate)).toList();
+      for (final expired in expiredListings) {
+        await removeListing(expired.id);
       }
 
       // Chats ve Vaults tamamen dinamik olacaksa artık JSON fallbacklerine gerek yok, boş başlayacak
@@ -814,6 +829,9 @@ class _SplashScreenState extends State<SplashScreen>
 
     _controller.forward();
 
+    // İzinleri iste (kamera, konum, medya)
+    _requestPermissions();
+
     // 3 Saniye sonra durum kontrolü yaparak geçiş
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
@@ -829,6 +847,42 @@ class _SplashScreenState extends State<SplashScreen>
         }
       }
     });
+  }
+
+  Future<void> _requestPermissions() async {
+    // Kamera ve galeri izinleri
+    final cameraStatus = await Permission.camera.request();
+    final photosStatus = await Permission.photos.request();
+    final locationStatus = await Permission.locationWhenInUse.request();
+
+    // Kalıcı reddedilmiş izin varsa ayarlara yönlendir
+    if ((cameraStatus.isPermanentlyDenied ||
+        photosStatus.isPermanentlyDenied ||
+        locationStatus.isPermanentlyDenied) && mounted) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('İzin Gerekli'),
+          content: const Text(
+            'GörBul\'un çalışabilmesi için Kamera, Konum ve Galeri izinleri gereklidir. '
+            'Lütfen Ayarlar\'dan bu izinleri açın.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Daha Sonra'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                openAppSettings();
+              },
+              child: const Text('Ayarları Aç'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   @override
@@ -2643,6 +2697,181 @@ class _StoryViewScreenState extends State<StoryViewScreen> {
 }
 
 // ---------------------------------------------------------------------------
+// MAP LOCATION PICKER (OpenStreetMap + Nominatim)
+// ---------------------------------------------------------------------------
+class MapLocationPickerScreen extends StatefulWidget {
+  final double? initialLat;
+  final double? initialLng;
+  const MapLocationPickerScreen({super.key, this.initialLat, this.initialLng});
+
+  @override
+  State<MapLocationPickerScreen> createState() => _MapLocationPickerScreenState();
+}
+
+class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
+  late final MapController _mapController;
+  LatLng? _selectedPoint;
+  String _address = 'Haritaya dokunarak konum seçin';
+  bool _isLoadingAddress = false;
+  bool _isLoadingGps = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mapController = MapController();
+    if (widget.initialLat != null && widget.initialLng != null) {
+      _selectedPoint = LatLng(widget.initialLat!, widget.initialLng!);
+      _reverseGeocode(_selectedPoint!);
+    }
+  }
+
+  Future<void> _reverseGeocode(LatLng point) async {
+    setState(() => _isLoadingAddress = true);
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}&accept-language=tr',
+      );
+      final res = await http.get(url, headers: {'User-Agent': 'GorBulApp/1.0'});
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        setState(() => _address = data['display_name'] ?? 'Adres bulunamadı');
+      }
+    } catch (e) {
+      setState(() => _address = 'Adres yüklenemedi');
+    } finally {
+      setState(() => _isLoadingAddress = false);
+    }
+  }
+
+  Future<void> _goToMyLocation() async {
+    setState(() => _isLoadingGps = true);
+    try {
+      LocationPermission perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Konum izni gerekli')));
+        setState(() => _isLoadingGps = false);
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final point = LatLng(pos.latitude, pos.longitude);
+      _mapController.move(point, 16);
+      setState(() => _selectedPoint = point);
+      await _reverseGeocode(point);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('GPS hatası: $e')));
+    } finally {
+      setState(() => _isLoadingGps = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final center = _selectedPoint ?? LatLng(39.9208, 32.8541); // Türkiye merkezi
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Konum Seç'),
+        actions: [
+          if (_selectedPoint != null)
+            TextButton(
+              onPressed: () => Navigator.pop(context, {
+                'lat': _selectedPoint!.latitude,
+                'lng': _selectedPoint!.longitude,
+                'address': _address,
+              }),
+              child: const Text('Tamam', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: center,
+              initialZoom: _selectedPoint != null ? 15 : 6,
+              onTap: (tapPosition, point) async {
+                setState(() => _selectedPoint = point);
+                await _reverseGeocode(point);
+              },
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.gorbul.app',
+              ),
+              if (_selectedPoint != null)
+                MarkerLayer(markers: [
+                  Marker(
+                    point: _selectedPoint!,
+                    width: 50,
+                    height: 50,
+                    child: const Icon(Icons.location_pin, color: Colors.red, size: 50),
+                  ),
+                ]),
+            ],
+          ),
+          // Alt bilgi kartı
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 10)],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Seçili Konum', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+                  const SizedBox(height: 4),
+                  _isLoadingAddress
+                      ? const LinearProgressIndicator()
+                      : Text(_address, style: const TextStyle(fontSize: 14), maxLines: 3, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _selectedPoint == null ? null : () => Navigator.pop(context, {
+                        'lat': _selectedPoint!.latitude,
+                        'lng': _selectedPoint!.longitude,
+                        'address': _address,
+                      }),
+                      icon: const Icon(Icons.check_circle),
+                      label: const Text('Bu Konumu Kullan'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // GPS butonu
+          Positioned(
+            bottom: 180,
+            right: 16,
+            child: FloatingActionButton(
+              heroTag: 'gps_btn',
+              mini: true,
+              backgroundColor: Colors.white,
+              onPressed: _isLoadingGps ? null : _goToMyLocation,
+              child: _isLoadingGps
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.my_location, color: Colors.blue),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 3. ADD LISTING SCREEN
 // ---------------------------------------------------------------------------
 class AddListingScreen extends StatefulWidget {
@@ -2809,63 +3038,26 @@ class _AddListingScreenState extends State<AddListingScreen> {
     }
   }
 
-  bool _isLocating = false;
   double? _currentLat;
   double? _currentLng;
   bool _isUrgent = false;
 
-  Future<void> _fetchCurrentLocation() async {
-    bool permitted = await AppUtils.requestEducationalPermission(
-      context, 
-      "Harita üzerinde ilanınızın doğru işaretlenebilmesi ve size yakın kayıpların listelenebilmesi için Konum izni gereklidir.", 
-      Icons.location_on
+  Future<void> _openMapPicker() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapLocationPickerScreen(
+          initialLat: _currentLat,
+          initialLng: _currentLng,
+        ),
+      ),
     );
-    
-    if (!permitted) return;
-
-    setState(() => _isLocating = true);
-
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Konum izni reddedildi.')));
-           setState(() => _isLocating = false);
-           return;
-        }
-      }
-      
-      if (permission == LocationPermission.deniedForever) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Konum izni kalıcı olarak reddedildi, ayarlardan açınız.')));
-        setState(() => _isLocating = false);
-        return;
-      }
-
-      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-
+    if (result != null && mounted) {
       setState(() {
-        _isLocating = false;
-        _currentLat = position.latitude;
-        _currentLng = position.longitude;
-        // İleride Reverse Geocoding ile adresi de alabiliriz, şimdilik koordinat + GPS onaylı metni koyuyoruz.
-        _locationController.text =
-            "Koordinat: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)} (GPS Onaylı) \u2714";
+        _currentLat = result['lat'] as double;
+        _currentLng = result['lng'] as double;
+        _locationController.text = result['address'] as String;
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Row(children: [
-            Icon(Icons.gps_fixed, color: Colors.white),
-            SizedBox(width: 8),
-            Text("Konum GPS üzerinden başarıyla alındı.")
-          ]),
-          backgroundColor: Colors.green,
-        ));
-      }
-    } catch (e) {
-       setState(() => _isLocating = false);
-       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Konum alınamadı: $e')));
     }
   }
 
