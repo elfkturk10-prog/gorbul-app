@@ -32,8 +32,11 @@ void main() async {
   // Initialize Persistent Storage (Cloud/Local)
   await DataStore.init();
 
-  // Tam ekran (Edge-to-Edge) - alttaki navbar uygulama üstüne gelmesin
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // Üstteki bildirim çubuğu kalır, alttaki geri/home tuş çubuğu KALDIRILIR
+  SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.manual,
+    overlays: [SystemUiOverlay.top],
+  );
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
