@@ -1162,14 +1162,28 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                           ),
                         ),
                         const SizedBox(height: 16),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.security, color: Colors.greenAccent[400], size: 16),
-                            const SizedBox(width: 6),
-                            const Text('Verileriniz şifreli & güvende.',
-                                style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          ],
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.security, color: Colors.greenAccent[400], size: 18),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Verileriniz şifreli & güvende.',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -4442,8 +4456,55 @@ class ProfileScreen extends StatelessWidget {
                 Navigator.push(context, MaterialPageRoute(builder: (c) => const DigitalVaultScreen()));
               },
             ),
-            _buildListTile(Icons.history, 'İlan Geçmişim', context),
-            _buildListTile(Icons.favorite_border, 'Favorilerim', context, isFavoriteMode: true),
+
+            // İlan Geçmişim
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.teal.withOpacity(0.1), shape: BoxShape.circle),
+                child: const Icon(Icons.history, color: Colors.teal),
+              ),
+              title: const Text('İlan Geçmişim', style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(
+                '${DataStore.listings.where((l) => l.ownerId == DataStore.currentUser?.id).length} ilan',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                final myListings = DataStore.listings.where((l) => l.ownerId == DataStore.currentUser?.id).toList();
+                showModalBottomSheet(
+                  context: context,
+                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                  builder: (ctx) => Column(
+                    children: [
+                      const Padding(padding: EdgeInsets.all(16), child: Text('İlanlarım', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+                      Expanded(
+                        child: myListings.isEmpty
+                            ? const Center(child: Text('Henüz ilan vermediniz.'))
+                            : ListView.builder(
+                                itemCount: myListings.length,
+                                itemBuilder: (ctx, i) {
+                                  final l = myListings[i];
+                                  return ListTile(
+                                    leading: Icon(l.status == 'resolved' ? Icons.check_circle : Icons.hourglass_top, color: l.status == 'resolved' ? Colors.green : Colors.blue),
+                                    title: Text(l.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    subtitle: Text(l.location),
+                                    trailing: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: l.status == 'resolved' ? Colors.green : Colors.orange, borderRadius: BorderRadius.circular(10)),
+                                      child: Text(l.status == 'resolved' ? 'Çözüldü' : 'Aktif', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
             ListTile(
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
@@ -4483,8 +4544,112 @@ class ProfileScreen extends StatelessWidget {
               },
             ),
 
-            _buildListTile(Icons.security, 'Güvenlik Ayarları', context),
-            _buildListTile(Icons.help_outline, 'Yardım ve Destek', context),
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.security, color: Colors.red),
+              ),
+              title: const Text('Güvenlik Ayarları',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Hesap güvenliği ve gizlilik', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Row(children: [
+                      Icon(Icons.security, color: Colors.red),
+                      SizedBox(width: 8),
+                      Text('Güvenlik Ayarları'),
+                    ]),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.lock_outline, color: Colors.indigo),
+                          title: const Text('Şifre Değiştir'),
+                          subtitle: const Text('Firebase ile yönetilir', style: TextStyle(fontSize: 11)),
+                          contentPadding: EdgeInsets.zero,
+                          onTap: () {},
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.notifications_active_outlined, color: Colors.orange),
+                          title: const Text('Bildirim Tercihleri'),
+                          subtitle: const Text('Yeni eşleşme ve mesaj bildirimleri', style: TextStyle(fontSize: 11)),
+                          contentPadding: EdgeInsets.zero,
+                          onTap: () {},
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.privacy_tip_outlined, color: Colors.teal),
+                          title: const Text('Gizlilik'),
+                          subtitle: const Text('Verilerinizi yönetin', style: TextStyle(fontSize: 11)),
+                          contentPadding: EdgeInsets.zero,
+                          onTap: () {},
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Kapat')),
+                    ],
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              leading: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.help_outline, color: Colors.blue),
+              ),
+              title: const Text('Yardım ve Destek',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: const Text('Sıkca sorulanlar ve iletişim', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Row(children: [
+                      Icon(Icons.help_outline, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Text('Yardım ve Destek'),
+                    ]),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('❓ Sıkça Sorulanlar', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        const Text('• İlan nasıl veririm?→ Alt menüden "İlan Ver"e bas.'),
+                        const SizedBox(height: 4),
+                        const Text('• Mes ajlaşma ücretsiz mi? → Evet, ücretsiz.'),
+                        const SizedBox(height: 4),
+                        const Text('• Portal duyuruları nedir? → Yerlinden yöneticinin portala özel mesajları.'),
+                        const Divider(height: 24),
+                        const Text('✉️ İletişim', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        const Text('destek@gorbul.app', style: TextStyle(color: Colors.blue)),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Kapat')),
+                    ],
+                  ),
+                );
+              },
+            ),
 
             const SizedBox(height: 24),
             Padding(
@@ -4493,6 +4658,7 @@ class ProfileScreen extends StatelessWidget {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () async {
+                    HapticFeedback.mediumImpact();
                     await DataStore.logout();
                     if (context.mounted) {
                       Navigator.pushAndRemoveUntil(
@@ -5760,9 +5926,8 @@ class QRGeneratorDialog extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(16),
               color: Colors.white,
-              // Gerçek uygulamada qr_flutter paketi kullanılır
               child: Image.network(
-                'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=gorbul://foundItem/user123',
+                'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=gorbul://foundItem/${DataStore.currentUser?.id ?? 'unknown'}',
                 height: 200,
                 width: 200,
               ),
