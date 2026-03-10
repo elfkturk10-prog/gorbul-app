@@ -525,6 +525,16 @@ class DataStore {
   }
 
   static Future<void> removeListing(String listingId) async {
+    // Resmi Firebase Storage'dan da sil
+    final listing = listings.firstWhere((l) => l.id == listingId, orElse: () => Listing(id:'', title:'', location:'', date:DateTime.now(), securityQuestion:'', securityAnswer:'', ownerId:''));
+    if (listing.imageUrl.isNotEmpty) {
+      try {
+        await FirebaseStorage.instance.refFromURL(listing.imageUrl).delete();
+      } catch (e) {
+        print("Storage image delete error: $e");
+      }
+    }
+
     listings.removeWhere((l) => l.id == listingId);
     await _saveListings();
 
@@ -533,6 +543,29 @@ class DataStore {
     } catch (e) {
       print("Firebase delete error: $e");
     }
+  }
+
+  static Future<void> deleteAccount() async {
+    final userId = currentUser?.id;
+    if (userId == null) return;
+
+    // Kullanıcının tüm ilanlarını Firebase'den sil
+    final userListings = listings.where((l) => l.ownerId == userId).toList();
+    for (final l in userListings) {
+      await removeListing(l.id);
+    }
+
+    // Kullanıcıyı Firebase'den sil
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(userId).delete();
+    } catch (e) {
+      print("Firebase user delete error: $e");
+    }
+
+    // Yerel bellekten de temizle
+    registeredUsers.removeWhere((u) => u.id == userId);
+    await _saveUsers();
+    await logout();
   }
 
   static Future<void> toggleFavorite(String listingId) async {
@@ -1807,8 +1840,6 @@ class _HomeScreenState extends State<HomeScreen> {
       bool matchesFilter = true;
       if (_selectedFilter == 'Kayıplar') {
         matchesFilter = listing.title.toLowerCase().contains('kayıp') || listing.isUrgent; // Basit mock tespit
-      } else if (_selectedFilter == 'Bulunanlar') {
-        matchesFilter = listing.title.toLowerCase().contains('bulundu') || listing.title.toLowerCase().contains('sahipsiz');
       } else if (_selectedFilter == 'Elektronik') {
         matchesFilter = listing.title.toLowerCase().contains('telefon') || listing.title.toLowerCase().contains('elektronik') || listing.title.toLowerCase().contains('bilgisayar');
       } else if (_selectedFilter == 'Yakınımdakiler') {
@@ -2097,7 +2128,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       _buildCategoryIcon('Tümü', Icons.apps, Colors.indigo),
                       _buildCategoryIcon('Kayıplar', Icons.search_off, Colors.redAccent),
-                      _buildCategoryIcon('Bulunanlar', Icons.task_alt, Colors.green),
                       _buildCategoryIcon('Elektronik', Icons.phone_iphone, Colors.blueGrey),
                       _buildCategoryIcon('Evcil Hayvan', Icons.pets, Colors.orange),
                       _buildCategoryIcon('Cüzdan', Icons.account_balance_wallet, Colors.brown),
@@ -4144,12 +4174,14 @@ class ProfileScreen extends StatelessWidget {
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: () {
-                    // Çıkış İşlemi
-                    Navigator.pushReplacement(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const LoginScreen()));
+                  onPressed: () async {
+                    await DataStore.logout();
+                    if (context.mounted) {
+                      Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(builder: (context) => const LoginScreen()),
+                          (route) => false);
+                    }
                   },
                   icon: const Icon(Icons.logout, color: Colors.red),
                   label: const Text('Güvenli Çıkış Yap',
@@ -4160,6 +4192,55 @@ class ProfileScreen extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    // 1. Onay
+                    final firstConfirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Hesabı Sil'),
+                        content: const Text('Hesabınızı silmek istediğinizden emin misiniz? Tüm ilanlarınız ve verileriniz Firebase\'den kalıcı olarak silinecektir.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('İptal')),
+                          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Evet, Sil', style: TextStyle(color: Colors.red))),
+                        ],
+                      ),
+                    );
+                    if (firstConfirm != true || !context.mounted) return;
+
+                    // 2. Onay (çift kontrol)
+                    final secondConfirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Son Onay'),
+                        content: const Text('Bu işlem GERİ ALINAMAZ! Hesabınız ve tüm ilanlarınız kalıcı olarak silinecek.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Vazgeç')),
+                          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: Colors.red), child: const Text('Hesabımı Kalıcı Olarak Sil')),
+                        ],
+                      ),
+                    );
+                    if (secondConfirm != true || !context.mounted) return;
+
+                    await DataStore.deleteAccount();
+                    if (context.mounted) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LoginScreen()),
+                        (route) => false,
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.delete_forever, color: Colors.grey),
+                  label: const Text('Hesabı Sil', style: TextStyle(color: Colors.grey)),
                 ),
               ),
             ),
