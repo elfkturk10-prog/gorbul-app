@@ -1421,7 +1421,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         return;
       }
 
-      String userSchoolName = _isTeacher ? _schoolNameController.text.trim() : _selectedSchool!;
+      String userSchoolName = _isTeacher ? _schoolNameController.text.trim().toUpperCase() : _selectedSchool!;
 
       // Yeni kullanıcı oluştur
       User newUser = User(
@@ -1530,23 +1530,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         _isTeacher 
                           ? TextFormField(
                               controller: _schoolNameController,
-                              decoration: const InputDecoration(labelText: 'Okulunuzun Tam Adı (Panel Oluşturulacak)', prefixIcon: Icon(Icons.school)),
-                              validator: (v) => v!.isEmpty ? 'Okul adı belirlemeniz gerekli' : null,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: const InputDecoration(
+                                labelText: 'Okulunuzun Kısaltması / Portal Kodu (Örn: BAL)', 
+                                prefixIcon: Icon(Icons.school)
+                              ),
+                              validator: (v) => v!.isEmpty ? 'Portal Kodu belirlemeniz gerekli' : null,
                             )
                           : _dynamicSchools.isEmpty 
                             ? Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
                                 child: const Text(
-                                  'Sisteme kayıtlı okul bulunamadı. Lütfen yöneticinizin portal açmasını bekleyin.',
+                                  'Sisteme kayıtlı portal bulunamadı. Lütfen yöneticinizin portal açmasını bekleyin.',
                                   style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
                                   textAlign: TextAlign.center,
                                 ),
                               )
                             : DropdownButtonFormField<String>(
                                 value: _selectedSchool,
-                                decoration: const InputDecoration(labelText: 'Okulunuz (Mevcut Portallar)', prefixIcon: Icon(Icons.school)),
-                                items: _dynamicSchools.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 14)))).toList(),
+                                decoration: const InputDecoration(labelText: 'Portal Kodunuz (Mevcut Portallar)', prefixIcon: Icon(Icons.school)),
+                                items: _dynamicSchools.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)))).toList(),
                                 onChanged: (val) {
                                   if (val != null) setState(() => _selectedSchool = val);
                                 },
