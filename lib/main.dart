@@ -202,6 +202,7 @@ class Listing {
   final String rewardAmount;
   final String schoolName;
   final String ownerId;
+  final String status; // 'active' veya 'resolved'
 
   Listing({
     required this.id,
@@ -220,6 +221,7 @@ class Listing {
     this.rewardAmount = '',
     this.schoolName = 'Belirtilmedi',
     required this.ownerId,
+    this.status = 'active',
   }) : expiryDate = expiryDate ?? date.add(const Duration(days: 15));
 
   Map<String, dynamic> toJson() {
@@ -240,6 +242,7 @@ class Listing {
       'rewardAmount': rewardAmount,
       'schoolName': schoolName,
       'ownerId': ownerId,
+      'status': status,
     };
   }
 
@@ -262,6 +265,7 @@ class Listing {
       rewardAmount: json['rewardAmount'] ?? '',
       schoolName: json['schoolName'] ?? 'Belirtilmedi',
       ownerId: json['ownerId'] ?? '',
+      status: json['status'] ?? 'active',
     );
   }
 }
@@ -557,6 +561,35 @@ class DataStore {
       await FirebaseFirestore.instance.collection('listings').doc(listingId).delete();
     } catch (e) {
       print("Firebase delete error: $e");
+    }
+  }
+
+  static Future<void> updateListingStatus(String listingId, String newStatus) async {
+    final idx = listings.indexWhere((l) => l.id == listingId);
+    if (idx == -1) return;
+
+    final old = listings[idx];
+    // Listing is immutable, recreate with new status
+    final updated = Listing(
+      id: old.id, title: old.title, location: old.location,
+      latitude: old.latitude, longitude: old.longitude,
+      date: old.date, expiryDate: old.expiryDate,
+      imageUrl: old.imageUrl, imageFile: old.imageFile,
+      securityQuestion: old.securityQuestion, securityAnswer: old.securityAnswer,
+      isUrgent: old.isUrgent, ownerName: old.ownerName,
+      rewardAmount: old.rewardAmount, schoolName: old.schoolName,
+      ownerId: old.ownerId, status: newStatus,
+    );
+    listings[idx] = updated;
+    await _saveListings();
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('listings')
+          .doc(listingId)
+          .update({'status': newStatus});
+    } catch (e) {
+      print("Status update error: $e");
     }
   }
 
@@ -1365,41 +1398,95 @@ class _ManagerDashboardScreenState extends State<ManagerDashboardScreen> {
                       itemBuilder: (context, index) {
                         final listing = myListings[index];
                         return Card(
-                          color: const Color(0xFF1E2D3D),
+                          color: listing.status == 'resolved'
+                              ? const Color(0xFF0D3320)  // Yeşilimsi arka plan
+                              : const Color(0xFF1E2D3D),
                           margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            leading: Icon(
-                              listing.isUrgent ? Icons.warning_amber_rounded : Icons.campaign,
-                              color: listing.isUrgent ? Colors.redAccent : Colors.blueGrey,
-                            ),
-                            title: Text(listing.title, style: const TextStyle(color: Colors.white)),
-                            subtitle: Text(
-                              listing.location,
-                              style: const TextStyle(color: Colors.white54, fontSize: 12),
-                            ),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.redAccent),
-                              onPressed: () async {
-                                final confirm = await showDialog<bool>(
-                                  context: context,
-                                  builder: (c) => AlertDialog(
-                                    title: const Text('İlanı Sil'),
-                                    content: const Text('Bu ilanı tamamen silmek istediğinizden emin misiniz?'),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('İptal')),
-                                      TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sil', style: TextStyle(color: Colors.red))),
-                                    ],
-                                  ),
-                                );
-
-                                if (confirm == true) {
-                                  await DataStore.removeListing(listing.id);
-                                  setState(() {});
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İlan silindi'), backgroundColor: Colors.green));
-                                  }
-                                }
-                              },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      listing.isUrgent ? Icons.warning_amber_rounded : Icons.inventory_2_outlined,
+                                      color: listing.isUrgent ? Colors.redAccent : Colors.blueGrey,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(listing.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    ),
+                                    // Durum rozeti
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: listing.status == 'resolved' ? Colors.green : Colors.orange,
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            listing.status == 'resolved' ? Icons.check_circle : Icons.hourglass_top,
+                                            color: Colors.white, size: 12,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            listing.status == 'resolved' ? 'Çözüldü' : 'İşlemde',
+                                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 26, top: 2),
+                                  child: Text(listing.location, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    if (listing.status != 'resolved')
+                                      TextButton.icon(
+                                        onPressed: () async {
+                                          await DataStore.updateListingStatus(listing.id, 'resolved');
+                                          setState(() {});
+                                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(content: Text('İlan çözüldü olarak işaretlendi ✓'), backgroundColor: Colors.green),
+                                          );
+                                        },
+                                        icon: const Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
+                                        label: const Text('Çözüldü Onayla', style: TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                                        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                      ),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                                      onPressed: () async {
+                                        final confirm = await showDialog<bool>(
+                                          context: context,
+                                          builder: (c) => AlertDialog(
+                                            title: const Text('İlanı Sil'),
+                                            content: const Text('Bu ilanı tamamen silmek istediğinizden emin misiniz?'),
+                                            actions: [
+                                              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('İptal')),
+                                              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sil', style: TextStyle(color: Colors.red))),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirm == true) {
+                                          await DataStore.removeListing(listing.id);
+                                          setState(() {});
+                                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İlan silindi'), backgroundColor: Colors.green));
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         );
