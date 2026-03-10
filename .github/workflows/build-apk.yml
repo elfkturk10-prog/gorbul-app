@@ -66,9 +66,14 @@ jobs:
           # MinSdkVersion: Firebase için 23 gerekiyor
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
 
+          # Global SDK Versions for plugins like geolocator that crash on Flutter 3.24
+          echo "ext.compileSdkVersion = 34" >> android/build.gradle
+          echo "ext.minSdkVersion = 23" >> android/build.gradle
+          echo "ext.targetSdkVersion = 34" >> android/build.gradle
+
       # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-name=1.0.0 --build-number=1
 
       - name: Get Version Tag
         id: version
