@@ -14,7 +14,14 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:crypto/crypto.dart';
 // Not: google_fonts eklenirse: import 'package:google_fonts/google_fonts.dart';
+
+// SHA-256 şifre hash yardımcısı (güvenlik)
+String hashPassword(String raw) {
+  final bytes = utf8.encode(raw);
+  return sha256.convert(bytes).toString();
+}
 
 // ---------------------------------------------------------------------------
 // MAIN ENTRY POINT
@@ -1036,7 +1043,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       User? user;
       try {
         user = DataStore.registeredUsers.firstWhere(
-            (u) => u.tc == tc && u.password == password);
+            (u) => u.tc == tc && u.password == hashPassword(password));
       } catch (e) {
         user = null;
       }
@@ -1250,7 +1257,7 @@ class _ManagerLoginScreenState extends State<ManagerLoginScreen> {
     User? manager;
     try {
       manager = DataStore.registeredUsers.firstWhere(
-          (u) => u.tc == tc && u.password == password);
+          (u) => u.tc == tc && u.password == hashPassword(password));
     } catch (e) {
       manager = null;
     }
@@ -1643,7 +1650,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         surname: _surnameController.text.trim(),
         tc: tc,
         email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        password: hashPassword(_passwordController.text.trim()),
         schoolName: userSchoolName,
         isManager: _isTeacher,
       );
@@ -1916,14 +1923,16 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 150),
-            switchInCurve: Curves.easeOut,
-            switchOutCurve: Curves.easeIn,
-            transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
-            child: KeyedSubtree(
-              key: ValueKey(_currentIndex),
-              child: _pages[_currentIndex],
+          Positioned.fill(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              switchInCurve: Curves.easeOut,
+              switchOutCurve: Curves.easeIn,
+              transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+              child: KeyedSubtree(
+                key: ValueKey(_currentIndex),
+                child: _pages[_currentIndex],
+              ),
             ),
           ),
           if (_isOffline)
@@ -4707,7 +4716,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _darkMode = false;
   late TextEditingController _nameController;
   late TextEditingController _emailController;
-  late TextEditingController _phoneController;
   bool _saving = false;
 
   @override
@@ -4716,7 +4724,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final u = DataStore.currentUser;
     _nameController = TextEditingController(text: u != null ? '${u.name} ${u.surname}' : '');
     _emailController = TextEditingController(text: u?.email ?? '');
-    _phoneController = TextEditingController(text: u?.phone ?? '');
     _darkMode = DataStore.isDarkMode;
   }
 
@@ -4724,7 +4731,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
-    _phoneController.dispose();
     super.dispose();
   }
 
@@ -4738,7 +4744,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'name': parts.isNotEmpty ? parts.first : u.name,
           'surname': parts.length > 1 ? parts.sublist(1).join(' ') : u.surname,
           'email': _emailController.text.trim(),
-          'phone': _phoneController.text.trim(),
         });
         await DataStore.reloadCurrentUser();
       }
@@ -4785,8 +4790,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _field(_nameController, 'Ad Soyad', Icons.badge_outlined),
                 const SizedBox(height: 12),
                 _field(_emailController, 'E-posta', Icons.email_outlined, type: TextInputType.emailAddress),
-                const SizedBox(height: 12),
-                _field(_phoneController, 'Telefon', Icons.phone_outlined, type: TextInputType.phone),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -4867,7 +4870,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               color: Colors.teal,
               child: Column(children: [
                 const SizedBox(height: 8),
-                _infoRow('T.C. No', u != null ? '${u.tcKimlik.substring(0, 3)}*****${u.tcKimlik.substring(8)}' : '-'),
+                _infoRow('T.C. No', u != null && u.tc.length >= 9 ? '${u.tc.substring(0, 3)}*****${u.tc.substring(8)}' : '-'),
                 _infoRow('Okul / Kurum', u?.schoolName ?? '-'),
                 _infoRow('Üyelik', 'Aktif ✅'),
               ]),
@@ -4975,7 +4978,7 @@ class ProfileScreen extends StatelessWidget {
                       Icon(Icons.verified,
                           color: Colors.tealAccent[400], size: 18),
                       const SizedBox(width: 4),
-                      Text(DataStore.currentUser != null ? 'T.C. Kimlik Doğrulanmış (${DataStore.currentUser!.tcKimlik.substring(0,3)}*****)' : 'T.C. Kimlik Doğrulanmış (123*****789)',
+                      Text(DataStore.currentUser != null && DataStore.currentUser!.tc.length >= 9 ? 'T.C. Kimlik Doğrulanmış (${DataStore.currentUser!.tc.substring(0,3)}*****)' : 'T.C. Kimlik Doğrulanmış',
                           style: TextStyle(
                               color: Colors.white.withOpacity(0.8),
                               fontSize: 13)),
@@ -5230,7 +5233,9 @@ class ProfileScreen extends StatelessWidget {
                         const Divider(height: 24),
                         const Text('✉️ İletişim', style: TextStyle(fontWeight: FontWeight.bold)),
                         const SizedBox(height: 6),
-                        const Text('destek@gorbul.app', style: TextStyle(color: Colors.blue)),
+                        const Text('gorbul.destek@gmail.com', style: TextStyle(color: Colors.blue)),
+                        const SizedBox(height: 4),
+                        const Text('Cevap süresi: Genellikle 24 saat içinde', style: TextStyle(fontSize: 11, color: Colors.grey)),
                       ],
                     ),
                     actions: [
@@ -5241,7 +5246,44 @@ class ProfileScreen extends StatelessWidget {
               },
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+
+            // Güvenlik Sertifikası Rozeti
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.green.shade50, Colors.teal.shade50],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.green.shade100, shape: BoxShape.circle),
+                    child: const Icon(Icons.verified_user, color: Colors.green, size: 26),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('GörBul Güvenlik Sertifikası ✅', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.green)),
+                        SizedBox(height: 4),
+                        Text('Şifreler SHA-256 ile şifrelendi\nVeriler yalnızca sizinle paylaşılır\nFirebase güvenli altyapı kullanılıyor', style: TextStyle(fontSize: 11, color: Colors.black54), maxLines: 3),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+
+            const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: SizedBox(

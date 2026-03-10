@@ -24,6 +24,7 @@ dependencies:
   flutter_map: any
   latlong2: any
   url_launcher: any
+  crypto: any
 
 dev_dependencies:
   flutter_test:

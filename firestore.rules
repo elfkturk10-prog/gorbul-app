@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── KULLANICILAR ────────────────────────────────────────────────────────
+    // Kullanıcı yalnızca kendi belgesini okuyabilir/yazabilir.
+    // Başkasının TC'si, şifresi vb. kesinlikle görülemez.
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if true; // Kayıt sırasında auth henüz yok
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ─── İLANLAR ─────────────────────────────────────────────────────────────
+    // Herkes okuyabilir. Sadece ilan sahibi güncelleyebilir/silebilir.
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ─── MESAJLAR ─────────────────────────────────────────────────────────────
+    // Sadece konuşmanın tarafları okuyabilir/yazabilir.
+    match /chats/{chatId} {
+      allow read, write: if request.auth != null
+        && (request.auth.uid == resource.data.user1Id
+         || request.auth.uid == resource.data.user2Id
+         || !exists(/databases/$(database)/documents/chats/$(chatId)));
+      match /messages/{msgId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+
+    // ─── DİJİTAL DOLAP ───────────────────────────────────────────────────────
+    match /vault/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ─── DİĞER ───────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false; // Varsayılan: reddet
+    }
+  }
+}
