@@ -381,10 +381,17 @@ class DataStore {
         }
       }
 
-      final usersFile = await _getFile('users.json');
-      if (await usersFile.exists()) {
-        final List<dynamic> jsonList = jsonDecode(await usersFile.readAsString());
-        registeredUsers = jsonList.map((j) => User.fromJson(j)).toList();
+      // USERS INIT WITH FIREBASE FALLBACK
+      try {
+        final snapshot = await FirebaseFirestore.instance.collection('users').get();
+        registeredUsers = snapshot.docs.map((doc) => User.fromJson(doc.data())).toList();
+      } catch (e) {
+        print("Firebase users error, falling back to local: $e");
+        final usersFile = await _getFile('users.json');
+        if (await usersFile.exists()) {
+          final List<dynamic> jsonList = jsonDecode(await usersFile.readAsString());
+          registeredUsers = jsonList.map((j) => User.fromJson(j)).toList();
+        }
       }
 
       // LISTINGS INIT WITH FIREBASE FALLBACK
@@ -483,6 +490,12 @@ class DataStore {
   static Future<void> registerUser(User user) async {
     registeredUsers.add(user);
     await _saveUsers();
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.id).set(user.toJson());
+    } catch (e) {
+      print("Firebase user save error: $e");
+    }
   }
 
   static Future<void> setLoggedIn(bool value, {User? user}) async {
