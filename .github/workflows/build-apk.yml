@@ -33,25 +33,38 @@ jobs:
 
       - name: Configure Android & Firebase
         run: |
-          # Android altyapısını oluştur (eksikse)
-          flutter create . --platforms=android || true
-
+          # Android v1 embedding hatasını önlemek için android klasörünü sıfırdan kur.
+          # Önce github'dan gelen özel dosyaları yedekle
+          mkdir -p /tmp/android_backup/res/drawable
+          cp android/app/google-services.json /tmp/android_backup/ || true
+          cp -r android/app/src/main/res/drawable/* /tmp/android_backup/res/drawable/ || true
+          
+          # Eski/bozuk android klasörünü sil
+          rm -rf android
+          
+          # Flutter 3.24 uyumlu yepyeni Android v2 projesi oluştur
+          flutter create --platforms=android --org com.gorbul.app .
+          
+          # Yedekleri geri yükle
+          cp /tmp/android_backup/google-services.json android/app/ || true
+          cp -r /tmp/android_backup/res/drawable/* android/app/src/main/res/drawable/ || true
+          
           # Uygulama adını düzelt
           sed -i 's/android:label="gorbul"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
           sed -i 's/android:label="görbultaslak1"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
 
-          # Firebase Google Services - settings.gradle (modern Flutter)
+          # Firebase Google Services Config - settings.gradle (modern Flutter)
           sed -i 's/id "dev.flutter.flutter-plugin-loader" version "1.0.0"/id "dev.flutter.flutter-plugin-loader" version "1.0.0"\n    id "com.google.gms.google-services" version "4.4.1" apply false/' android/settings.gradle || true
+          
+          # Firebase config - app/build.gradle
           sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/' android/app/build.gradle || true
-
-          # Eski Flutter proje yapısı (apply plugin yöntemi)
+          
+          # Eski yapılar için fallback Firebase configurations
           sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle || true
           sed -i 's/dependencies {/dependencies {\n        classpath "com.google.gms:google-services:4.4.1"/' android/build.gradle || true
 
           # MinSdkVersion: Firebase için 23 gerekiyor
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
-          sed -i 's/minSdkVersion 21/minSdkVersion 23/' android/app/build.gradle || true
-          sed -i 's/minSdkVersion 22/minSdkVersion 23/' android/app/build.gradle || true
 
       # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)
       - name: Build APK
