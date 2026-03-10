@@ -73,7 +73,6 @@ class NotificationService {
       channelDescription: 'Bu kanal uygulama içi kritik ve anlık uyarılar içindir.',
       importance: Importance.max,
       priority: Priority.high,
-      playBadge: true,
       enableVibration: true,
     );
     const notificationDetails = NotificationDetails(android: androidDetails);
@@ -667,7 +666,7 @@ class DataStore {
     // OTOMATİK BİLDİRİM
     NotificationService.showLocalNotification(
       'Kasa Güncellendi 🔒',
-      '${item.name} başarıyla Dijital Dolaba eklendi.',
+      '${item.title} başarıyla Dijital Dolaba eklendi.',
     );
 
     try {
@@ -3391,7 +3390,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
   static const String geminiApiKey = "AIzaSyCDbO6GvdREKfmQJeJrfhn1nJzy8MB27uw";
 
   // Gerçek AI Analiz Entegrasyonu (Gemini)
-  void _analyzeWithAI() async {
+  void _simulateAIAnalysis() async {
     if (_selectedImages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Önce analiz edilecek bir resim seçin.')));
       return;
