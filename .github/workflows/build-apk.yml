@@ -69,6 +69,7 @@ jobs:
           # compileSdkVersion ve targetSdkVersion'ı ayarla (app/build.gradle)
           sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 35/' android/app/build.gradle || true
           sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/' android/app/build.gradle || true
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/' android/app/build.gradle || true
 
           # flutter.sdk yolunu local.properties'e yaz (geolocator gibi plugin'ler buna ihtiyaç duyar)
           FLUTTER_BIN=$(which flutter)
@@ -77,7 +78,7 @@ jobs:
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
           echo "Flutter SDK path: $FLUTTER_SDK"
 
-          # ext değerlerini de ekle
+          # ext değerlerini de ekle (Global Gradle özellikleri)
           echo "ext.compileSdkVersion = 35" >> android/build.gradle
           echo "ext.minSdkVersion = 23" >> android/build.gradle
           echo "ext.targetSdkVersion = 35" >> android/build.gradle
