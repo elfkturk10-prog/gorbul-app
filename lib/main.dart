@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -4103,7 +4104,29 @@ class DetailScreen extends StatelessWidget {
                           ),
                           label: const Text('Mesaj At',
                               style: TextStyle(color: Color(0xFF0A1F44))),
-                        )
+                        ),
+                        if (listing.latitude != null && listing.longitude != null)
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              final lat = listing.latitude!;
+                              final lng = listing.longitude!;
+                              // Google Maps yol tarifi URL'si - direkt navigasyon modu
+                              final uri = Uri.parse(
+                                'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+                              );
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              }
+                            },
+                            icon: const Icon(Icons.directions, color: Colors.white, size: 16),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green[700],
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20)),
+                            ),
+                            label: const Text('Yol Tarifi Al',
+                                style: TextStyle(color: Colors.white)),
+                          )
                       ],
                     ),
                     const SizedBox(height: 16),

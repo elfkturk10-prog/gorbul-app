@@ -23,6 +23,7 @@ dependencies:
   http: any
   flutter_map: any
   latlong2: any
+  url_launcher: any
 
 dev_dependencies:
   flutter_test:
