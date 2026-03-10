@@ -82,9 +82,6 @@ jobs:
           echo "ext.minSdkVersion = 23" >> android/build.gradle
           echo "ext.targetSdkVersion = 35" >> android/build.gradle
 
-          # TÜM plugin subproject'leri için compileSdkVersion'ı override et
-          # Bu, geolocator_android gibi flutter.compileSdkVersion okuyan eklentileri düzeltir
-          printf '\nsubprojects {\n    afterEvaluate { proj ->\n        if (proj.hasProperty("android")) {\n            proj.android { compileSdkVersion 35 }\n        }\n    }\n}\n' >> android/build.gradle
 
       # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)
       - name: Build APK
