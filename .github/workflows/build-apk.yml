@@ -43,7 +43,7 @@ jobs:
           rm -rf android
           
           # Flutter 3.24 uyumlu yepyeni Android v2 projesi oluştur
-          flutter create --platforms=android --org com.gorbul.app .
+          flutter create --platforms=android --org com.gorbul.app --project-name gorbul .
           
           # Yedekleri geri yükle
           cp /tmp/android_backup/google-services.json android/app/ || true
