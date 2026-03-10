@@ -1854,6 +1854,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
 // ---------------------------------------------------------------------------
 // 3. MAIN SCREEN (BOTTOM NAVIGATION BAR)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Hafif sayfa geçişi (slide + fade, 200ms)
+// ---------------------------------------------------------------------------
+PageRoute<T> slideRoute<T>(Widget page) => PageRouteBuilder<T>(
+  pageBuilder: (_, __, ___) => page,
+  transitionDuration: const Duration(milliseconds: 200),
+  reverseTransitionDuration: const Duration(milliseconds: 150),
+  transitionsBuilder: (_, anim, __, child) => SlideTransition(
+    position: Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero)
+        .animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+    child: FadeTransition(opacity: anim, child: child),
+  ),
+);
+
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
 
@@ -1902,7 +1916,16 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          _pages[_currentIndex],
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 150),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
+            child: KeyedSubtree(
+              key: ValueKey(_currentIndex),
+              child: _pages[_currentIndex],
+            ),
+          ),
           if (_isOffline)
             Positioned(
               top: 0,
@@ -1925,42 +1948,108 @@ class _MainScreenState extends State<MainScreen> {
             )
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
-            )
-          ],
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Theme.of(context).cardColor,
-          selectedItemColor: Theme.of(context).brightness == Brightness.dark ? Colors.tealAccent : Theme.of(context).primaryColor,
-          unselectedItemColor: Colors.grey,
-          showUnselectedLabels: true,
-          items: const [
-            BottomNavigationBarItem(
-                icon: Icon(Icons.saved_search), label: 'Vitrin'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.map_outlined), label: 'Harita'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.add_circle_outline), label: 'İlan Ver'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.campaign_outlined), label: 'Pano'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.chat_bubble_outline), label: 'Mesajlar'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.person_outline), label: 'Profilim'),
-          ],
+      bottomNavigationBar: _AnimatedBottomNav(
+        currentIndex: _currentIndex,
+        onTap: (i) => setState(() => _currentIndex = i),
+      ),
+    );
+  }
+}
+
+// Animasyonlu bottom nav
+class _AnimatedBottomNav extends StatefulWidget {
+  final int currentIndex;
+  final void Function(int) onTap;
+  const _AnimatedBottomNav({required this.currentIndex, required this.onTap});
+  @override
+  State<_AnimatedBottomNav> createState() => _AnimatedBottomNavState();
+}
+
+class _AnimatedBottomNavState extends State<_AnimatedBottomNav> with TickerProviderStateMixin {
+  late List<AnimationController> _controllers;
+  final _items = [
+    [Icons.saved_search, Icons.saved_search, 'Vitrin'],
+    [Icons.map_outlined, Icons.map, 'Harita'],
+    [Icons.add_circle_outline, Icons.add_circle, 'İlan Ver'],
+    [Icons.campaign_outlined, Icons.campaign, 'Pano'],
+    [Icons.chat_bubble_outline, Icons.chat_bubble, 'Mesajlar'],
+    [Icons.person_outline, Icons.person, 'Profilim'],
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = List.generate(
+      _items.length,
+      (_) => AnimationController(vsync: this, duration: const Duration(milliseconds: 180)),
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) c.dispose();
+    super.dispose();
+  }
+
+  void _onTap(int i) {
+    _controllers[i].forward().then((_) => _controllers[i].reverse());
+    HapticFeedback.selectionClick();
+    widget.onTap(i);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).brightness == Brightness.dark ? Colors.tealAccent : Theme.of(context).primaryColor;
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12, offset: const Offset(0, -3))],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(_items.length, (i) {
+              final selected = i == widget.currentIndex;
+              return GestureDetector(
+                onTap: () => _onTap(i),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ScaleTransition(
+                        scale: Tween<double>(begin: 1.0, end: 0.75)
+                            .animate(CurvedAnimation(parent: _controllers[i], curve: Curves.easeInOut)),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 150),
+                          child: Icon(
+                            selected ? (_items[i][1] as IconData) : (_items[i][0] as IconData),
+                            key: ValueKey(selected),
+                            color: selected ? primary : Colors.grey,
+                            size: selected ? 26 : 22,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 150),
+                        style: TextStyle(
+                          color: selected ? primary : Colors.grey,
+                          fontSize: selected ? 11 : 10,
+                          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        child: Text(_items[i][2] as String),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
         ),
       ),
     );
