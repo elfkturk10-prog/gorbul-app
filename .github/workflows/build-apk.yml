@@ -53,8 +53,7 @@ jobs:
           sed -i 's/android:label="gorbul"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
           
           # flutter.sdk yolunu local.properties'e yaz (geolocator gibi plugin'ler buna ihtiyaç duyar)
-          FLUTTER_SDK=$(flutter sdk-path)
-          echo "flutter.sdk=$FLUTTER_SDK" > android/local.properties
+          echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
           
           # Root build.gradle düzenleme (ext properties ve buildscript)
