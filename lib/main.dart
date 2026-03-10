@@ -376,6 +376,17 @@ class DataStore {
   static bool hasSeenOnboarding = false;
   static List<User> registeredUsers = [];
   static User? currentUser;
+  static bool isDarkMode = false;
+
+  static void setDarkMode(bool v) { isDarkMode = v; }
+
+  static Future<void> reloadCurrentUser() async {
+    if (currentUser == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(currentUser!.id).get();
+      if (doc.exists) currentUser = User.fromJson(doc.data()!);
+    } catch (_) {}
+  }
 
   static Future<File> _getFile(String filename) async {
     final dir = await getApplicationDocumentsDirectory();
@@ -2988,6 +2999,7 @@ class _AddListingScreenState extends State<AddListingScreen> {
   List<File> _selectedImages = [];
   bool _isCompressing = false;
   bool _isAnalyzing = false;
+  bool _isLocating = false;
   List<String> _aiTags = [];
   bool _isUrgent = false;
   
@@ -2999,11 +3011,31 @@ class _AddListingScreenState extends State<AddListingScreen> {
   @override
   void initState() {
     super.initState();
-    _requestPermissions(); // Sayfa açılınca izinleri iste
+    _requestPermissions();
   }
 
-  Future<void> _requestPermissions() async {
-    // İzinler, basit bir mockup olarak simüle ediliyor
+  Future<void> _requestPermissions() async {}
+
+  Future<void> _fetchCurrentLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) throw Exception('Konum servisi kapalı');
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) throw Exception('İzin reddedildi');
+      }
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      setState(() {
+        _currentLat = pos.latitude;
+        _currentLng = pos.longitude;
+        _locationController.text = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)} (GPS)';
+      });
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Konum alınamadı: $e')));
+    }
+    if (mounted) setState(() => _isLocating = false);
   }
 
   // Görüntü seçme ve Kamera
@@ -3135,7 +3167,6 @@ class _AddListingScreenState extends State<AddListingScreen> {
 
   double? _currentLat;
   double? _currentLng;
-  bool _isUrgent = false;
 
   Future<void> _openMapPicker() async {
     final result = await Navigator.push<Map<String, dynamic>>(
@@ -3217,137 +3248,219 @@ class _AddListingScreenState extends State<AddListingScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
+    final steps = [
+      {'icon': Icons.photo_camera, 'label': 'Foto\u011fraf'},
+      {'icon': Icons.info_outline, 'label': 'Detaylar'},
+      {'icon': Icons.shield_outlined, 'label': 'G\u00fcvenlik'},
+      {'icon': Icons.rocket_launch, 'label': 'Yay\u0131nla'},
+    ];
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F6FB),
       appBar: AppBar(
-        title: const Text('Yeni İlan Ver', style: TextStyle(letterSpacing: 1.0, fontWeight: FontWeight.bold)),
-        elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: Theme.of(context).primaryColor,
+        title: const Text('Yeni \u0130lan Ver', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
         centerTitle: true,
+        elevation: 0,
+        backgroundColor: const Color(0xFF0A1F44),
+        foregroundColor: Colors.white,
       ),
-      backgroundColor: Colors.grey[100], // Modern gri zemin
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 1. Görsel Kartı
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Fotoğraf & Yapay Zeka', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 12),
-                    _buildStep1ImageAndAI(context),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // 2. Kategori ve Konum Kartı
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('İlan Detayları', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 16),
-                    _buildStep2CategoryAndLocation(context),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // 3. Güvenlik ve Ödül Kartı
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Özellikler & Güvenlik', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 16),
-                    _buildStep3SecurityAndReward(context),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 32),
-              
-              // 4. Gönder Butonu
-              SizedBox(
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _submitListing,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).primaryColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    elevation: 4,
+      body: Column(
+        children: [
+          // ====== STEPPER HEADER ======
+          Container(
+            color: const Color(0xFF0A1F44),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+            child: Column(
+              children: [
+                // Progress bar
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (_currentStep + 1) / steps.length,
+                    backgroundColor: Colors.white24,
+                    color: Colors.tealAccent,
+                    minHeight: 6,
                   ),
-                  child: const Text('İlanı Güvenle Yayınla', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                ),
+                const SizedBox(height: 16),
+                // Step dots
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: List.generate(steps.length, (i) {
+                    final done = i < _currentStep;
+                    final active = i == _currentStep;
+                    return Column(
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: active ? 52 : 40,
+                          height: active ? 52 : 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: done
+                                ? Colors.tealAccent
+                                : active
+                                    ? Colors.white
+                                    : Colors.white24,
+                            border: Border.all(
+                              color: active ? Colors.tealAccent : Colors.transparent,
+                              width: 2,
+                            ),
+                            boxShadow: active
+                                ? [BoxShadow(color: Colors.tealAccent.withOpacity(0.4), blurRadius: 12)]
+                                : [],
+                          ),
+                          child: Icon(
+                            done ? Icons.check : (steps[i]['icon'] as IconData),
+                            color: done
+                                ? Colors.white
+                                : active
+                                    ? const Color(0xFF0A1F44)
+                                    : Colors.white54,
+                            size: active ? 26 : 20,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          steps[i]['label'] as String,
+                          style: TextStyle(
+                            color: active ? Colors.tealAccent : Colors.white60,
+                            fontSize: 11,
+                            fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ),
+              ],
+            ),
+          ),
+
+          // ====== CONTENT ======
+          Expanded(
+            child: Form(
+              key: _formKey,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 350),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (child, anim) => SlideTransition(
+                  position: Tween<Offset>(begin: const Offset(0.15, 0), end: Offset.zero)
+                      .animate(anim),
+                  child: FadeTransition(opacity: anim, child: child),
+                ),
+                child: SingleChildScrollView(
+                  key: ValueKey(_currentStep),
+                  padding: const EdgeInsets.all(20),
+                  child: _buildCurrentStep(context),
                 ),
               ),
-              const SizedBox(height: 24),
-            ],
+            ),
           ),
-        ),
+
+          // ====== BOTTOM NAV BUTTONS ======
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, -4))],
+            ),
+            child: Row(
+              children: [
+                if (_currentStep > 0)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _currentStep--);
+                      },
+                      icon: const Icon(Icons.arrow_back_ios, size: 16),
+                      label: const Text('Geri'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        side: const BorderSide(color: Color(0xFF0A1F44)),
+                        foregroundColor: const Color(0xFF0A1F44),
+                      ),
+                    ),
+                  ),
+                if (_currentStep > 0) const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton.icon(
+                    onPressed: _isUploading ? null : () {
+                      HapticFeedback.mediumImpact();
+                      if (_currentStep < steps.length - 1) {
+                        setState(() => _currentStep++);
+                      } else {
+                        _submitListing();
+                      }
+                    },
+                    icon: _isUploading
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Icon(_currentStep == steps.length - 1 ? Icons.rocket_launch : Icons.arrow_forward_ios, size: 18),
+                    label: Text(
+                      _isUploading ? 'Y\u00fckl\u00fcyor...' : _currentStep == steps.length - 1 ? '\u0130lan\u0131 Yay\u0131nla! \ud83d\ude80' : 'Devam Et',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _currentStep == steps.length - 1 ? Colors.teal : const Color(0xFF0A1F44),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ==== STEP 1 WIDGET ====
-  Widget _buildStep1ImageAndAI(BuildContext context) {
+  Widget _buildCurrentStep(BuildContext context) {
+    switch (_currentStep) {
+      case 0: return _buildStepPhoto(context);
+      case 1: return _buildStepDetails(context);
+      case 2: return _buildStepSecurity(context);
+      case 3: return _buildStepPublish(context);
+      default: return const SizedBox.shrink();
+    }
+  }
+
+  // ===== STEP 0: FOTO\u011eRAF =====
+  Widget _buildStepPhoto(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          onTap: _selectedImages.length >= 5 ? null : () {
-            showModalBottomSheet(
-                context: context,
-                builder: (ctx) {
-                  return SafeArea(
-                    child: Wrap(
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.camera_alt, color: Color(0xFF0A1F44)),
-                          title: const Text('Kamera', style: TextStyle(fontWeight: FontWeight.bold)),
-                          onTap: () { Navigator.pop(ctx); _pickImage('camera'); },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.photo_library, color: Color(0xFF0A1F44)),
-                          title: const Text('Galeri', style: TextStyle(fontWeight: FontWeight.bold)),
-                          onTap: () { Navigator.pop(ctx); _pickImage('gallery'); },
-                        ),
-                      ],
-                    ),
-                  );
-                });
-          },
-          child: Container(
-            height: 200,
+        _sectionHeader(Icons.camera_alt_outlined, 'Foto\u011fraf Ekle', 'Evsyas\u0131n\u0131n net bir foto\u011fraf\u0131n\u0131 ekle', Colors.indigo),
+        const SizedBox(height: 20),
+
+        // Ana foto\u011fraf alan\u0131
+        GestureDetector(
+          onTap: () => _showImageSourceSheet(context),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            height: 220,
             decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
+              gradient: _selectedImages.isEmpty
+                  ? LinearGradient(
+                      colors: [Colors.indigo.shade50, Colors.blue.shade50],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    )
+                  : null,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _selectedImages.length >= 5 ? Colors.grey : Theme.of(context).primaryColor.withOpacity(0.5), width: 2),
+              border: Border.all(
+                color: _selectedImages.isEmpty ? Colors.indigo.withOpacity(0.3) : Colors.indigo,
+                width: 2,
+                strokeAlign: BorderSide.strokeAlignOutside,
+              ),
+              boxShadow: [BoxShadow(color: Colors.indigo.withOpacity(0.1), blurRadius: 16, offset: const Offset(0, 6))],
             ),
             child: _selectedImages.isNotEmpty
                 ? ClipRRect(
@@ -3355,393 +3468,544 @@ class _AddListingScreenState extends State<AddListingScreen> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.file(_selectedImages.first, fit: BoxFit.cover, errorBuilder: (c, e, s) => Container(color: Colors.grey[300])),
+                        Image.file(_selectedImages.first, fit: BoxFit.cover),
                         if (_isAnalyzing)
                           Container(
-                            color: Colors.black45,
-                            child: const Column(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.55),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                CircularProgressIndicator(color: Colors.tealAccent),
-                                SizedBox(height: 12),
-                                Text('Yapay Zeka Tarıyor...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                const CircularProgressIndicator(color: Colors.tealAccent, strokeWidth: 3),
+                                const SizedBox(height: 14),
+                                const Text('Yapay Zeka Analiz Ediyor...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                               ],
                             ),
-                          )
+                          ),
+                        Positioned(
+                          bottom: 10, right: 10,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.edit, color: Colors.white, size: 14),
+                                const SizedBox(width: 4),
+                                Text('${_selectedImages.length}/5 foto\u011fraf', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   )
                 : Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add_a_photo, size: 50, color: Theme.of(context).primaryColor.withOpacity(0.5)),
-                      const SizedBox(height: 8),
-                      const Text('Fotoğraf Ekle', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.indigo.withOpacity(0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.add_a_photo_outlined, size: 48, color: Colors.indigo),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Foto\u011fraf \u00c7ek veya Se\u00e7', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Colors.indigo)),
+                      const SizedBox(height: 6),
+                      Text('En fazla 5 foto\u011fraf \u2022 Otomatik s\u0131k\u0131\u015ft\u0131r\u0131l\u0131r', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
                     ],
                   ),
           ),
         ),
-        
-        // Thumbnails List
+
+        // Thumbnail\'lar
         if (_selectedImages.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           SizedBox(
-            height: 60,
+            height: 72,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              itemCount: _selectedImages.length,
-              itemBuilder: (context, index) {
+              itemCount: _selectedImages.length + (_selectedImages.length < 5 ? 1 : 0),
+              itemBuilder: (ctx, i) {
+                if (i == _selectedImages.length) {
+                  return GestureDetector(
+                    onTap: () => _showImageSourceSheet(context),
+                    child: Container(
+                      width: 72,
+                      margin: const EdgeInsets.only(right: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.indigo.withOpacity(0.4), style: BorderStyle.solid, width: 2),
+                        borderRadius: BorderRadius.circular(14),
+                        color: Colors.indigo.shade50,
+                      ),
+                      child: const Icon(Icons.add, color: Colors.indigo),
+                    ),
+                  );
+                }
                 return Container(
-                  width: 60,
-                  margin: const EdgeInsets.only(right: 12),
+                  width: 72,
+                  margin: const EdgeInsets.only(right: 10),
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Theme.of(context).primaryColor, width: 2),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.indigo, width: 2),
                   ),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
                       ClipRRect(
-                         borderRadius: BorderRadius.circular(10),
-                         child: Image.file(_selectedImages[index], fit: BoxFit.cover)
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(_selectedImages[i], fit: BoxFit.cover),
                       ),
-                      Align(
-                        alignment: Alignment.topRight,
+                      Positioned(
+                        top: 2, right: 2,
                         child: GestureDetector(
-                          onTap: () => setState(() => _selectedImages.removeAt(index)),
+                          onTap: () => setState(() => _selectedImages.removeAt(i)),
                           child: Container(
-                            margin: const EdgeInsets.all(2),
                             decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                            child: const Icon(Icons.close, size: 14, color: Colors.white),
+                            padding: const EdgeInsets.all(2),
+                            child: const Icon(Icons.close, size: 12, color: Colors.white),
                           ),
                         ),
-                      )
-                    ]
-                  )
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
-          )
+          ),
         ],
 
-        if (_selectedImages.isNotEmpty && _aiTags.isEmpty && !_isAnalyzing)
-          Padding(
-            padding: const EdgeInsets.only(top: 16.0),
+        // AI Analiz butonu
+        if (_selectedImages.isNotEmpty && _aiTags.isEmpty && !_isAnalyzing) ...[
+          const SizedBox(height: 20),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [Colors.purple.shade700, Colors.indigo.shade500]),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(color: Colors.purple.withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 4))],
+            ),
             child: ElevatedButton.icon(
               onPressed: _simulateAIAnalysis,
               icon: const Icon(Icons.auto_awesome, color: Colors.white),
-              label: const Text('Görseli Yapay Zeka ile Analiz Et'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, padding: const EdgeInsets.symmetric(vertical: 12)),
+              label: const Text('\u2728 Yapay Zeka ile Otomatik Doldur', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
             ),
           ),
-          
-        if (_aiTags.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 16.0),
+          const SizedBox(height: 8),
+          Center(child: Text('Foto\u011fraf\u0131 analiz edip ba\u015fl\u0131k ve etiket olu\u015fturur', style: TextStyle(fontSize: 12, color: Colors.grey.shade500))),
+        ],
+
+        if (_aiTags.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.purple.shade50,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.purple.shade200),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('AI Tarafından Çıkarılan Etiketler:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
+                Row(children: [
+                  const Icon(Icons.auto_awesome, color: Colors.purple, size: 18),
+                  const SizedBox(width: 6),
+                  const Text('AI Etiketleri', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.purple)),
+                ]),
                 const SizedBox(height: 8),
                 Wrap(
-                  spacing: 8,
-                  children: _aiTags.map((t) => Chip(
-                    label: Text(t, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                    backgroundColor: Colors.purple,
+                  spacing: 6, runSpacing: 6,
+                  children: _aiTags.map((t) => Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: Colors.purple.shade600, borderRadius: BorderRadius.circular(20)),
+                    child: Text(t, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
                   )).toList(),
                 ),
               ],
             ),
           ),
+        ],
       ],
     );
   }
 
-  // ==== STEP 2 WIDGET ====
-  Widget _buildStep2CategoryAndLocation(BuildContext context) {
+  void _showImageSourceSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(padding: const EdgeInsets.all(10), decoration: const BoxDecoration(color: Color(0xFFEAF0FF), shape: BoxShape.circle), child: const Icon(Icons.camera_alt, color: Color(0xFF0A1F44))),
+                title: const Text('Kamera ile \u00c7ek', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('Hemen foto\u011fraf \u00e7ek'),
+                onTap: () { Navigator.pop(ctx); _pickImage('camera'); },
+              ),
+              ListTile(
+                leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.purple.shade50, shape: BoxShape.circle), child: Icon(Icons.photo_library, color: Colors.purple.shade600)),
+                title: const Text('Galeriden Se\u00e7', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('Telefon galerisinden se\u00e7'),
+                onTap: () { Navigator.pop(ctx); _pickImage('gallery'); },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ===== STEP 1: DETAYLAR =====
+  Widget _buildStepDetails(BuildContext context) {
+    final categoryIcons = {'C\u00fczdan': Icons.account_balance_wallet_outlined, 'Elektronik': Icons.devices_outlined, 'Anahtar': Icons.key_outlined, '\u00c7anta': Icons.shopping_bag_outlined, 'Evcil Hayvan': Icons.pets, 'Di\u011fer': Icons.category_outlined};
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Kategori Seçimi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.grey)),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
+        _sectionHeader(Icons.category_outlined, 'Kategori Se\u00e7', 'Evsyas\u0131 ne t\u00fcr?', Colors.blue),
+        const SizedBox(height: 16),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 1.2,
           children: _categories.map((cat) {
             final isSelected = _selectedCategory == cat;
-            return ChoiceChip(
-              label: Text(cat),
-              selected: isSelected,
-              onSelected: (selected) {
-                 setState(() => _selectedCategory = selected ? cat : null);
+            return GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _selectedCategory = cat);
               },
-              selectedColor: Theme.of(context).primaryColor.withOpacity(0.2),
-              labelStyle: TextStyle(
-                color: isSelected ? Theme.of(context).primaryColor : Colors.grey[700],
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  color: isSelected ? const Color(0xFF0A1F44) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: isSelected ? const Color(0xFF0A1F44) : Colors.grey.shade200, width: 2),
+                  boxShadow: isSelected
+                      ? [BoxShadow(color: const Color(0xFF0A1F44).withOpacity(0.3), blurRadius: 10)]
+                      : [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(categoryIcons[cat] ?? Icons.category, color: isSelected ? Colors.tealAccent : Colors.grey.shade600, size: 28),
+                    const SizedBox(height: 6),
+                    Text(cat, style: TextStyle(color: isSelected ? Colors.white : Colors.grey.shade700, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, fontSize: 12), textAlign: TextAlign.center),
+                  ],
+                ),
               ),
             );
           }).toList(),
         ),
         const SizedBox(height: 24),
-        // Emanetçi info to the DetailScreen
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.blue.withOpacity(0.5)),
-          ),
-          child: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.blue),
-                  SizedBox(width: 8),
-                  Text(
-                    'Emanetçi Bilgisi',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue),
-                  ),
-                ],
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Eşyanızı bir emanetçiye bıraktıysanız, emanetçinin adını ve iletişim bilgilerini buraya ekleyebilirsiniz. Bu, eşyanın bulunmasını kolaylaştıracaktır.',
-                style: TextStyle(fontSize: 12, color: Colors.black87),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        
+        _sectionHeader(Icons.edit_note, '\u0130lan Ba\u015fl\u0131\u011f\u0131', 'Ne kaybettiniz?', Colors.teal),
+        const SizedBox(height: 14),
         TextFormField(
           controller: _titleController,
           decoration: InputDecoration(
-              labelText: 'İlan Başlığı / Ne Kaybettiniz?',
-              prefixIcon: const Icon(Icons.title),
-              filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : const Color(0xFFF5F7FA)),
-          validator: (v) => v!.isEmpty ? 'Başlık Gerekli' : null,
+            labelText: '\u0130lan Ba\u015fl\u0131\u011f\u0131 / Ne Kaybettiniz?',
+            prefixIcon: const Icon(Icons.title_outlined),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.grey.shade200)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF0A1F44), width: 2)),
+          ),
+          validator: (v) => v!.isEmpty ? 'Ba\u015fl\u0131k gerekli' : null,
         ),
-        const SizedBox(height: 16),
-        
+        const SizedBox(height: 24),
+        _sectionHeader(Icons.location_on_outlined, 'Konum', 'Nerede kayboldu?', Colors.red),
+        const SizedBox(height: 14),
         TextFormField(
           controller: _locationController,
           decoration: InputDecoration(
-              labelText: 'Bulunduğu / Kaybolduğu Konum',
-              prefixIcon: const Icon(Icons.pin_drop),
-              suffixIcon: IconButton(
-                icon: _isLocating ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location, color: Colors.blue),
-                onPressed: _isLocating ? null : _fetchCurrentLocation,
-                tooltip: 'GPS Konumumu Al',
-              ),
-              filled: true,
-              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : const Color(0xFFF5F7FA)),
-          validator: (v) => v!.isEmpty ? 'Konum Gerekli' : null,
-        ),
-
-        // MOCK MAP PREVIEW CARD
-        if (_locationController.text.isNotEmpty && _locationController.text.contains('GPS')) ...[
-          const SizedBox(height: 16),
-          Container(
-            height: 150,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.blue.withOpacity(0.3), width: 2),
+            labelText: 'Kayboldu\u011fu / Bulundu\u011fu Yer',
+            prefixIcon: const Icon(Icons.pin_drop_outlined),
+            suffixIcon: IconButton(
+              icon: _isLocating
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.my_location, color: Colors.blue),
+              onPressed: _isLocating ? null : _fetchCurrentLocation,
+              tooltip: 'GPS Konumumu Al',
             ),
-            child: Stack(
-              children: [
-                // Simulate Map Background
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    color: Colors.grey[300],
-                  )
-                ),
-                const Center(
-                  child: Icon(Icons.location_on, size: 40, color: Colors.red),
-                ),
-              ]
-            ),
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.grey.shade200)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Colors.red, width: 2)),
           ),
-          const SizedBox(height: 8),
-          const Text('Konum harita üzerinde işaretlendi.', style: TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-        ]
+          validator: (v) => v!.isEmpty ? 'Konum gerekli' : null,
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _openMapPicker,
+          icon: const Icon(Icons.map_outlined),
+          label: const Text('Haritadan Konum Se\u00e7'),
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: Colors.grey.shade300),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+        if (_currentLat != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.green.shade200)),
+            child: Row(children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 18),
+              const SizedBox(width: 8),
+              Text('Konum haritaya i\u015faretlendi \u2713', style: TextStyle(color: Colors.green.shade700, fontWeight: FontWeight.w500)),
+            ]),
+          ),
+        ],
       ],
     );
   }
 
-  // ==== STEP 3 WIDGET ====
-  Widget _buildStep3SecurityAndReward(BuildContext context) {
+  // ===== STEP 2: G\u00dcVENL\u0130K =====
+  Widget _buildStepSecurity(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Ödül Sistemi (Bounty)
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.amber.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.amber),
-          ),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.monetization_on, color: Colors.amber),
-                  SizedBox(width: 8),
-                  Text('Bulana Ödül (Bounty)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.orange)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              const Text('Eşyanızı bulan kişiye bir teşekkür ödülü belirterek bulunma ihtimalini %400 artırabilirsiniz.', style: TextStyle(fontSize: 12, color: Colors.black54)),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _rewardController,
-                decoration: InputDecoration(
-                    labelText: 'Ödül Miktarı (Opsiyonel)',
-                    hintText: 'Örn: 500 TL veya Hediye Çeki',
-                    prefixIcon: const Icon(Icons.card_giftcard),
-                    filled: true,
-                    fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.white,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
+        _sectionHeader(Icons.shield_outlined, 'G\u00fcvenlik & \u00d6d\u00fcl', 'Sahipli\u011fi ispatla', Colors.green),
+        const SizedBox(height: 20),
 
-        // Acil İlan Alanı
-        SwitchListTile(
-          title: const Text('Bu bir acil durumdur', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-          subtitle: const Text('Evcil hayvan, yaşlı, hayati ilaç vb. durumlarda işaretleyin. İlan kırmızı çerçeve ile öne çıkar.'),
-          value: _isUrgent,
-          activeColor: Colors.red,
-          onChanged: (val) {
-             setState(() => _isUrgent = val);
+        // Acil ilan
+        GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setState(() => _isUrgent = !_isUrgent);
           },
-          secondary: const Icon(Icons.warning_rounded, color: Colors.red),
-          contentPadding: EdgeInsets.zero,
-        ),
-        const SizedBox(height: 24),
-        
-        // Acil İlan Alanı
-        SwitchListTile(
-          title: const Text('Bu bir acil durumdur', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-          subtitle: const Text('Evcil hayvan, yaşlı, hayati ilaç vb. durumlarda işaretleyin. İlan kırmızı çerçeve ile öne çıkar.'),
-          value: _isUrgent,
-          activeColor: Colors.red,
-          onChanged: (val) {
-             setState(() => _isUrgent = val);
-          },
-          secondary: const Icon(Icons.warning_rounded, color: Colors.red),
-          contentPadding: EdgeInsets.zero,
-        ),
-        const SizedBox(height: 24),
-
-        // Güvenlik Formu
-        const Row(
-          children: [
-            Icon(Icons.security, color: Colors.green),
-            SizedBox(width: 8),
-            Text('Akıllı Eşleşme Güvenliği', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Container(
-          decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-            border: Border.all(color: Colors.green.withOpacity(0.3)),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _isUrgent ? Colors.red.shade50 : Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _isUrgent ? Colors.red : Colors.grey.shade200, width: 2),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10)],
+            ),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), shape: BoxShape.circle),
+                child: Icon(Icons.warning_rounded, color: Colors.red.shade600, size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('ACiL \u0130LAN', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.red)),
+                Text('Evcil hayvan, hayati ila\u00e7, ya\u015fl\u0131 birey vb. \u2022 \u0130lan \u00f6ne \u00e7\u0131kar', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              ])),
+              Switch(value: _isUrgent, onChanged: (v) => setState(() => _isUrgent = v), activeColor: Colors.red),
+            ]),
           ),
+        ),
+        const SizedBox(height: 16),
+
+        // \u00d6d\u00fcl kart\u0131
+        Container(
           padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Sadece gerçek sahibinin bilebileceği bir detay:', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _securityQuestionController,
-                decoration: InputDecoration(
-                    labelText: 'Güvenlik Sorusu',
-                    hintText: 'Örn: Anahtarlığın rengi ne?',
-                    prefixIcon: const Icon(Icons.help_outline),
-                    filled: true,
-                    fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : const Color(0xFFF5F7FA)),
-                validator: (v) => v!.isEmpty ? 'Zorunlu güvenlik sorusu' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _securityAnswerController,
-                decoration: InputDecoration(
-                    labelText: 'Doğru Cevabınız',
-                    hintText: 'Sahibi bu cevabı vermeli',
-                    prefixIcon: const Icon(Icons.vpn_key),
-                    filled: true,
-                    fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : const Color(0xFFF5F7FA)),
-                validator: (v) => v!.isEmpty ? 'Cevap gerekli' : null,
-              ),
-            ],
+          decoration: BoxDecoration(
+            gradient: LinearGradient(colors: [Colors.amber.shade50, Colors.orange.shade50]),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.amber.shade300),
           ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.amber.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.monetization_on, color: Colors.amber, size: 22)),
+              const SizedBox(width: 10),
+              const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Bulana \u00d6d\u00fcl', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.orange)),
+                Text('Bulunma ihtimalini %400 art\u0131r\u0131r!', style: TextStyle(fontSize: 11, color: Colors.black54)),
+              ]),
+            ]),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _rewardController,
+              decoration: InputDecoration(
+                hintText: '\u00d6rn: 200 TL veya Hediye \u00c7eki',
+                prefixIcon: const Icon(Icons.card_giftcard, color: Colors.amber),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              ),
+            ),
+          ]),
         ),
+        const SizedBox(height: 16),
 
-        const SizedBox(height: 32),
-        // FINAL SUMMARY CARD
-        const Text('İlan Özeti', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        const SizedBox(height: 12),
+        // G\u00fcvenlik formu
         Container(
-           decoration: BoxDecoration(
-             color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[800] : Colors.blueGrey[50],
-             borderRadius: BorderRadius.circular(16),
-             border: Border.all(color: Colors.blueGrey.withOpacity(0.3)),
-           ),
-           padding: const EdgeInsets.all(16),
-           child: Row(
-             crossAxisAlignment: CrossAxisAlignment.start,
-             children: [
-               if (_selectedImages.isNotEmpty)
-                 ClipRRect(
-                   borderRadius: BorderRadius.circular(12),
-                   child: Image.file(_selectedImages.first, width: 80, height: 80, fit: BoxFit.cover)
-                 )
-               else
-                 Container(
-                   width: 80, height: 80,
-                   decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(12)),
-                   child: const Icon(Icons.image_not_supported, color: Colors.grey),
-                 ),
-               const SizedBox(width: 16),
-               Expanded(
-                 child: Column(
-                   crossAxisAlignment: CrossAxisAlignment.start,
-                   children: [
-                     Text(_titleController.text.isEmpty ? 'Kategori Seçilmedi' : _titleController.text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                     const SizedBox(height: 4),
-                     Row(
-                       children: [
-                         const Icon(Icons.location_on, size: 14, color: Colors.red),
-                         const SizedBox(width: 4),
-                         Expanded(child: Text(_locationController.text.isEmpty ? 'Konum Girilmedi' : _locationController.text, style: TextStyle(fontSize: 12, color: Colors.grey[600]), maxLines: 1, overflow: TextOverflow.ellipsis)),
-                       ],
-                     ),
-                     const SizedBox(height: 8),
-                     if (_rewardController.text.isNotEmpty)
-                       Container(
-                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                         decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(8)),
-                         child: Text('Ödül: ${_rewardController.text}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.white)),
-                       )
-                   ],
-                 ),
-               )
-             ],
-           ),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.green.shade200, width: 1.5),
+            boxShadow: [BoxShadow(color: Colors.green.withOpacity(0.06), blurRadius: 14)],
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.green.shade50, shape: BoxShape.circle), child: Icon(Icons.lock_outlined, color: Colors.green.shade700, size: 24)),
+              const SizedBox(width: 12),
+              const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Ak\u0131ll\u0131 E\u015fle\u015fme G\u00fcvenli\u011fi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                Text('Sadece ger\u00e7ek sahibi bilebilir', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ])),
+            ]),
+            const SizedBox(height: 18),
+            TextFormField(
+              controller: _securityQuestionController,
+              decoration: InputDecoration(
+                labelText: 'Gizli Soru',
+                hintText: '\u00d6rn: Anahtar\u0131m\u0131n kabl\u0131n rengi?',
+                prefixIcon: Icon(Icons.help_outline, color: Colors.green.shade600),
+                filled: true,
+                fillColor: Colors.green.shade50,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.green.shade400, width: 2)),
+              ),
+              validator: (v) => v!.isEmpty ? 'G\u00fcvenlik sorusu gerekli' : null,
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _securityAnswerController,
+              decoration: InputDecoration(
+                labelText: 'Gizli Cevap',
+                hintText: 'Sahibi bu cevab\u0131 vermeli',
+                prefixIcon: Icon(Icons.vpn_key_outlined, color: Colors.green.shade600),
+                filled: true,
+                fillColor: Colors.green.shade50,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.green.shade400, width: 2)),
+              ),
+              validator: (v) => v!.isEmpty ? 'Cevap gerekli' : null,
+            ),
+          ]),
         ),
       ],
     );
+  }
+
+  // ===== STEP 3: YAYINLA =====
+  Widget _buildStepPublish(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _sectionHeader(Icons.rocket_launch, 'Can\u0131nlaz\u0131r!', '\u0130lan\u0131n haz\u0131r, yay\u0131nlayal\u0131m', Colors.teal),
+        const SizedBox(height: 20),
+        // \u00d6zet kart\u0131
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 16)],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: _selectedImages.isNotEmpty
+                    ? Image.file(_selectedImages.first, width: 90, height: 90, fit: BoxFit.cover)
+                    : Container(width: 90, height: 90, color: Colors.grey.shade200, child: const Icon(Icons.image_not_supported_outlined, color: Colors.grey, size: 36)),
+              ),
+              const SizedBox(width: 16),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (_selectedCategory != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: const Color(0xFF0A1F44), borderRadius: BorderRadius.circular(8)),
+                    child: Text(_selectedCategory!, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                const SizedBox(height: 6),
+                Text(_titleController.text.isEmpty ? 'Ba\u015fl\u0131k girilmedi' : _titleController.text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.location_on, size: 13, color: Colors.red),
+                  const SizedBox(width: 3),
+                  Expanded(child: Text(_locationController.text.isEmpty ? 'Konum girilmedi' : _locationController.text, style: TextStyle(fontSize: 12, color: Colors.grey.shade600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                ]),
+                if (_rewardController.text.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(8)),
+                    child: Text('\ud83c\udfc6 \u00d6d\u00fcl: ${_rewardController.text}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+                if (_isUrgent) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
+                    child: const Text('\u26a1 ACiL \u0130LAN', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ])),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.teal.shade200)),
+          child: Column(children: [
+            const Row(children: [
+              Icon(Icons.info_outline, color: Colors.teal, size: 18),
+              SizedBox(width: 8),
+              Text('Yay\u0131nland\u0131ktan sonra', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal)),
+            ]),
+            const SizedBox(height: 10),
+            _checkRow('\u0130lan portal\u0131ndaki herkese g\u00f6r\u00fcn\u00fcr olur'),
+            _checkRow('Haritada konumun i\u015faretlenir'),
+            _checkRow('Yeni mesajlar i\u00e7in bildirim al\u0131rs\u0131n'),
+            _checkRow('Y\u00f6netici onaylad\u0131ktan sonra tamamlan\u0131r'),
+          ]),
+        ),
+      ],
+    );
+  }
+
+  Widget _checkRow(String text) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(children: [
+      const Icon(Icons.check_circle_outline, color: Colors.teal, size: 16),
+      const SizedBox(width: 8),
+      Text(text, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+    ]),
+  );
+
+  Widget _sectionHeader(IconData icon, String title, String subtitle, Color color) {
+    return Row(children: [
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(14)),
+        child: Icon(icon, color: color, size: 24),
+      ),
+      const SizedBox(width: 14),
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+      ]),
+    ]);
   }
 }
 
@@ -4334,7 +4598,233 @@ class ROWTitle extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// 5. PROFILE & SETTINGS SCREEN  (YENİ EKLENDİ)
+// SETTINGS SCREEN (GERÇEKTEn ÇALIŞIYOR)
+// ---------------------------------------------------------------------------
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _notificationsEnabled = true;
+  bool _darkMode = false;
+  late TextEditingController _nameController;
+  late TextEditingController _emailController;
+  late TextEditingController _phoneController;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = DataStore.currentUser;
+    _nameController = TextEditingController(text: u != null ? '${u.name} ${u.surname}' : '');
+    _emailController = TextEditingController(text: u?.email ?? '');
+    _phoneController = TextEditingController(text: u?.phone ?? '');
+    _darkMode = DataStore.isDarkMode;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveProfile() async {
+    setState(() => _saving = true);
+    try {
+      final u = DataStore.currentUser;
+      if (u != null) {
+        final parts = _nameController.text.trim().split(' ');
+        await FirebaseFirestore.instance.collection('users').doc(u.id).update({
+          'name': parts.isNotEmpty ? parts.first : u.name,
+          'surname': parts.length > 1 ? parts.sublist(1).join(' ') : u.surname,
+          'email': _emailController.text.trim(),
+          'phone': _phoneController.text.trim(),
+        });
+        await DataStore.reloadCurrentUser();
+      }
+      if (mounted) {
+        HapticFeedback.mediumImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ Profil güncellendi!'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    if (mounted) setState(() => _saving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = DataStore.currentUser;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Ayarlar', style: TextStyle(fontWeight: FontWeight.bold)),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0A1F44),
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      backgroundColor: const Color(0xFFF4F6FB),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Profil bilgileri kartı
+            _card(
+              icon: Icons.person_outline,
+              title: 'Profil Bilgileri',
+              color: Colors.indigo,
+              child: Column(children: [
+                const SizedBox(height: 14),
+                _field(_nameController, 'Ad Soyad', Icons.badge_outlined),
+                const SizedBox(height: 12),
+                _field(_emailController, 'E-posta', Icons.email_outlined, type: TextInputType.emailAddress),
+                const SizedBox(height: 12),
+                _field(_phoneController, 'Telefon', Icons.phone_outlined, type: TextInputType.phone),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _saving ? null : _saveProfile,
+                    icon: _saving
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.save_outlined),
+                    label: Text(_saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+
+            // Görünüm
+            _card(
+              icon: Icons.palette_outlined,
+              title: 'Görünüm',
+              color: Colors.purple,
+              child: Column(children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.purple.shade50, shape: BoxShape.circle),
+                    child: Icon(Icons.dark_mode_outlined, color: Colors.purple.shade700),
+                  ),
+                  title: const Text('Karanlık Mod', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Koyu tema kullan'),
+                  value: _darkMode,
+                  activeColor: Colors.purple,
+                  onChanged: (val) {
+                    HapticFeedback.selectionClick();
+                    setState(() => _darkMode = val);
+                    DataStore.setDarkMode(val);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(val ? '🌙 Karanlık mod açıldı (yeniden başlatınca aktif)' : '☀️ Aydınlık mod'), duration: const Duration(seconds: 2)),
+                    );
+                  },
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+
+            // Bildirimler
+            _card(
+              icon: Icons.notifications_outlined,
+              title: 'Bildirimler',
+              color: Colors.orange,
+              child: Column(children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.orange.shade50, shape: BoxShape.circle),
+                    child: Icon(Icons.notifications_active_outlined, color: Colors.orange.shade700),
+                  ),
+                  title: const Text('Yeni Eşleşme Bildirimi', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Birisi ilanını gördüğünde bildir'),
+                  value: _notificationsEnabled,
+                  activeColor: Colors.orange,
+                  onChanged: (val) => setState(() => _notificationsEnabled = val),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+
+            // Hesap bilgileri (salt okunur)
+            _card(
+              icon: Icons.verified_user_outlined,
+              title: 'Hesap Bilgileri',
+              color: Colors.teal,
+              child: Column(children: [
+                const SizedBox(height: 8),
+                _infoRow('T.C. No', u != null ? '${u.tcKimlik.substring(0, 3)}*****${u.tcKimlik.substring(8)}' : '-'),
+                _infoRow('Okul / Kurum', u?.schoolName ?? '-'),
+                _infoRow('Üyelik', 'Aktif ✅'),
+              ]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _card({required IconData icon, required String title, required Color color, required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 14)],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(padding: const EdgeInsets.all(9), decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color, size: 20)),
+          const SizedBox(width: 10),
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        ]),
+        child,
+      ]),
+    );
+  }
+
+  Widget _field(TextEditingController c, String label, IconData icon, {TextInputType? type}) => TextField(
+    controller: c,
+    keyboardType: type,
+    decoration: InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, size: 20),
+      filled: true,
+      fillColor: const Color(0xFFF4F6FB),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Colors.indigo, width: 2)),
+    ),
+  );
+
+  Widget _infoRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(children: [
+      Text('$label: ', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+      Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
+    ]),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 5. PROFILE & SETTINGS SCREEN
 // ---------------------------------------------------------------------------
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -4346,7 +4836,11 @@ class ProfileScreen extends StatelessWidget {
         title: const Text('Profilim', style: TextStyle(letterSpacing: 1.0)),
         elevation: 0,
         actions: [
-          IconButton(icon: const Icon(Icons.settings), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Ayarlar',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+          ),
         ],
       ),
       body: SingleChildScrollView(
