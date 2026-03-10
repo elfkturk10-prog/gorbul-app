@@ -66,24 +66,25 @@ jobs:
           # MinSdkVersion: Firebase için 23 gerekiyor
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
 
-          # compileSdkVersion ve targetSdkVersion'ı ayarla (flutter.xxx placeholder yerine gerçek değer)
+          # compileSdkVersion ve targetSdkVersion'ı ayarla (app/build.gradle)
           sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 35/' android/app/build.gradle || true
           sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/' android/app/build.gradle || true
 
-          # Global SDK Versions for plugins like geolocator that crash on Flutter 3.24
+          # flutter.sdk yolunu local.properties'e yaz (geolocator gibi plugin'ler buna ihtiyaç duyar)
+          FLUTTER_BIN=$(which flutter)
+          FLUTTER_SDK=$(dirname $(dirname $FLUTTER_BIN))
+          echo "flutter.sdk=$FLUTTER_SDK" >> android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+          echo "Flutter SDK path: $FLUTTER_SDK"
+
+          # ext değerlerini de ekle
           echo "ext.compileSdkVersion = 35" >> android/build.gradle
           echo "ext.minSdkVersion = 23" >> android/build.gradle
           echo "ext.targetSdkVersion = 35" >> android/build.gradle
 
-          # geolocator_android plugin'ini doğrudan patch et (flutter extension okuma hatasını önler)
-          GEOLOCATOR_GRADLE=$(find /root/.pub-cache /home/runner/.pub-cache -name "build.gradle" -path "*/geolocator_android*" 2>/dev/null | head -1)
-          if [ -n "$GEOLOCATOR_GRADLE" ]; then
-            sed -i "s/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/g" "$GEOLOCATOR_GRADLE" || true
-            sed -i "s/compileSdk flutter.compileSdkVersion/compileSdk 35/g" "$GEOLOCATOR_GRADLE" || true
-            sed -i "s/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/g" "$GEOLOCATOR_GRADLE" || true
-            sed -i "s/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g" "$GEOLOCATOR_GRADLE" || true
-            echo "Patched geolocator_android: $GEOLOCATOR_GRADLE"
-          fi
+          # TÜM plugin subproject'leri için compileSdkVersion'ı override et
+          # Bu, geolocator_android gibi flutter.compileSdkVersion okuyan eklentileri düzeltir
+          printf '\nsubprojects {\n    afterEvaluate { proj ->\n        if (proj.hasProperty("android")) {\n            proj.android { compileSdkVersion 35 }\n        }\n    }\n}\n' >> android/build.gradle
 
       # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)
       - name: Build APK
