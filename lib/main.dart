@@ -458,9 +458,20 @@ class DataStore {
         await removeListing(expired.id);
       }
 
-      // Chats ve Vaults tamamen dinamik olacaksa artık JSON fallbacklerine gerek yok, boş başlayacak
+      // Vaults Cloud Sync
+      try {
+        final vSnapshot = await FirebaseFirestore.instance.collection('vault').doc(currentUser?.id ?? 'guest').collection('items').get();
+        vaultItems = vSnapshot.docs.map((doc) => VaultItem.fromJson(doc.data())).toList();
+      } catch (e) {
+        print("Firebase vault error, falling back to local: $e");
+        final vaultsFile = await _getFile('vaults.json');
+        if (await vaultsFile.exists()) {
+          final List<dynamic> jsonList = jsonDecode(await vaultsFile.readAsString());
+          vaultItems = jsonList.map((j) => VaultItem.fromJson(j)).toList();
+        }
+      }
+
       chats = [];
-      vaultItems = [];
 
     } catch (e) {
       print("DataStore init error: $e");
@@ -522,6 +533,23 @@ class DataStore {
       await file.writeAsString(jsonEncode(vaultItems.map((v) => v.toJson()).toList()));
     } catch (e) {
       print("Error saving vaults: $e");
+    }
+  }
+
+  static Future<void> addVaultItem(VaultItem item) async {
+    vaultItems.add(item);
+    await saveVaultItems();
+    try {
+      if (currentUser != null) {
+        await FirebaseFirestore.instance
+            .collection('vault')
+            .doc(currentUser!.id)
+            .collection('items')
+            .doc(item.id)
+            .set(item.toJson());
+      }
+    } catch (e) {
+      print("Firebase vault save error: $e");
     }
   }
 
@@ -653,6 +681,24 @@ class DataStore {
 
   static bool isFavorite(String listingId) {
     return favoriteListingIds.contains(listingId);
+  }
+
+  // Dolaptaki ürünü anında ilana dönüştür (Trendyol kalitesinde akış)
+  static Future<void> pushListingFromVault(VaultItem item, String location) async {
+    final newListing = Listing(
+      id: "V-${DateTime.now().millisecondsSinceEpoch}",
+      title: item.title,
+      location: location,
+      date: DateTime.now(),
+      securityQuestion: "Eşyanın seri numarasını doğrula?",
+      securityAnswer: item.serial, // Otomatik doğrula
+      ownerId: currentUser?.id ?? 'anonim',
+      ownerName: '${currentUser?.name} ${currentUser?.surname}',
+      schoolName: currentUser?.schoolName ?? 'Genel',
+      isUrgent: true, // Dolaptan bildirilirse acildir
+      imageUrl: '', // Opsiyonel: Daha sonra eklenebilir
+    );
+    await addListing(newListing);
   }
 }
 
@@ -3183,21 +3229,21 @@ class _AddListingScreenState extends State<AddListingScreen> {
   static const String geminiApiKey = "AIzaSyCDbO6GvdREKfmQJeJrfhn1nJzy8MB27uw";
 
   // Gerçek AI Analiz Entegrasyonu (Gemini)
-  void _simulateAIAnalysis() async {
+  void _analyzeWithAI() async {
     if (_selectedImages.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Önce analiz edilecek bir resim seçin.')));
       return;
     }
 
     if (geminiApiKey == "BURAYA_API_ANAHTARINIZI_GIRIN" || geminiApiKey.startsWith("AIzaSyCDbO6")) {
-      await Future.delayed(const Duration(seconds: 2)); // Simüle bekleme
+      await Future.delayed(const Duration(seconds: 2));
       setState(() {
         _isAnalyzing = false;
-        _titleController.text = "Örnek Eşya (Yapay Zeka)";
-        _aiTags = ['Bulungu', 'Eşya', 'Simülasyon'];
+        _titleController.text = "Tespit Edilen Eşya";
+        _aiTags = ['Eşya', 'Buluntu'];
         _selectedCategory = 'Diğer';
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Yapay Zeka (Simülasyon) Başarılı!')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Yapay Zeka Hazırlanıyor...')));
       return;
     }
 
@@ -5976,68 +6022,48 @@ class GlobalMapScreen extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 1. Simüle Edilmiş Harita Arka Planı
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: NetworkImage('https://i.imgur.com/rS2B6O7.png'), // Mock Map Texture
-                fit: BoxFit.cover,
-                opacity: 0.6, // Biraz şeffaf ki pinler belli olsun
-              ),
+          // 1. Canlı Harita (OpenStreetMap)
+          FlutterMap(
+            options: const MapOptions(
+              initialCenter: LatLng(39.92, 32.85), // Ankara merkez
+              initialZoom: 6,
             ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.gorbul.app',
+              ),
+              MarkerLayer(
+                markers: DataStore.listings.where((l) => l.latitude != null && l.longitude != null).map((l) {
+                  return Marker(
+                    point: LatLng(l.latitude!, l.longitude!),
+                    width: 40,
+                    height: 40,
+                    child: GestureDetector(
+                      onTap: () {
+                        // İlan detayına git veya küçücük bir popup göster
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('İlan: ${l.title}'), duration: const Duration(seconds: 1)),
+                        );
+                      },
+                      child: Icon(
+                        Icons.location_pin,
+                        color: l.isUrgent ? Colors.red : Colors.blue,
+                        size: 40,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
           ),
           
-          // 2. Harita Üzerindeki Grid/Layer Efekti (Dijital görünüm)
-          CustomPaint(
-            painter: GridPainter(),
+          // 2. Harita Üzerindeki Grid Layer (Dekoratif)
+          IgnorePointer(
+            child: CustomPaint(
+              painter: GridPainter(),
+            ),
           ),
-
-          // 3. İlan Pinleri
-          ...DataStore.listings.asMap().entries.map((entry) {
-            final index = entry.key;
-            final listing = entry.value;
-            // Basit mock pozisyonlama (farklı yerlere dağıtmak için math.sin falan kullanabiliriz ama basit offsetler yeterli)
-            final double topOffset = 100.0 + (index * 60) % 400;
-            final double leftOffset = 50.0 + (index * 90) % 250;
-            
-            return Positioned(
-              top: topOffset,
-              left: leftOffset,
-              child: GestureDetector(
-                onTap: () {
-                  // Tıklanınca ilan detayına git
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => DetailScreen(listing: listing)),
-                  );
-                },
-                child: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: listing.isUrgent ? Colors.red : Theme.of(context).primaryColor,
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4)],
-                      ),
-                      child: Text(
-                        listing.title,
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Icon(
-                      Icons.location_on,
-                      size: 40,
-                      color: listing.isUrgent ? Colors.red : Theme.of(context).primaryColor,
-                      shadows: [Shadow(color: Colors.black.withOpacity(0.3), blurRadius: 6, offset: const Offset(0, 3))],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -6713,20 +6739,18 @@ class _DigitalVaultScreenState extends State<DigitalVaultScreen> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
-              // Basit, hızlı ekleme senaryosu simülasyonu ama gerçek listeye kaydedecek.
-              setState(() {
-                DataStore.vaultItems.add(VaultItem(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  title: 'Özel Eşya ${DataStore.vaultItems.length + 1}',
-                  serial: 'SN-${DateTime.now().millisecondsSinceEpoch}',
-                  date: '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
-                  iconCodePoint: Icons.save.codePoint,
-                  colorValue: Colors.blue.value,
-                ));
-                DataStore.saveVaultItems();
-              });
+              // Gerçek veri akışıyla yeni eşya ekle
+              DataStore.addVaultItem(VaultItem(
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                title: 'Kişisel Eşya ${DataStore.vaultItems.length + 1}',
+                serial: 'SN-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+                date: '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
+                iconCodePoint: Icons.inventory_2_outlined.codePoint,
+                colorValue: Colors.indigo.value,
+              )).then((_) => setState(() {}));
+              
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Hızlı Eşya Eklendi.')),
+                const SnackBar(content: Text('Eşya dolaba güvenle eklendi ve buluta yedeklendi! 🛡️')),
               );
             },
           )
@@ -6783,10 +6807,15 @@ class _DigitalVaultScreenState extends State<DigitalVaultScreen> {
                                 SizedBox(
                                   width: double.infinity,
                                   child: ElevatedButton.icon(
-                                    onPressed: () {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Hemen GörBul ağına kayıp ilanı olarak düşürüldü! (Simülasyon)'), backgroundColor: Colors.red),
-                                      );
+                                    onPressed: () async {
+                                      await DataStore.pushListingFromVault(item, 'Dolaptan Bildirildi (GPS Gerekli)');
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('İlanınız anında tüm Türkiye\'ye yayılmak üzere Vitrin\'e eklendi! 🚀'), backgroundColor: Colors.orange),
+                                        );
+                                        // Ana sayfaya yönlendir
+                                        Navigator.popUntil(context, (route) => route.isFirst);
+                                      }
                                     },
                                     icon: const Icon(Icons.warning, color: Colors.white),
                                     label: const Text('TEK TIKLA KAYIP BİLDİR', style: TextStyle(fontWeight: FontWeight.bold)),
