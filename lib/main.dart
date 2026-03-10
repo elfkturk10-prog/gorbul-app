@@ -1028,6 +1028,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       ],
                     ),
                   ),
+                  // ---- SEKME 2: KAYIT OL ----
+                  const RegisterScreen(),
+
+                  // ---- SEKME 3: YÖNETİCİ ----
+                  const ManagerLoginScreen(),
                 ],
               ),
             ),
