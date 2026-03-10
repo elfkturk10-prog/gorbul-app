@@ -51,42 +51,124 @@ jobs:
           
           # Uygulama adını düzelt
           sed -i 's/android:label="gorbul"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
-          sed -i 's/android:label="görbultaslak1"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
-
-          # Firebase Google Services Config - settings.gradle (modern Flutter)
-          sed -i 's/id "dev.flutter.flutter-plugin-loader" version "1.0.0"/id "dev.flutter.flutter-plugin-loader" version "1.0.0"\n    id "com.google.gms.google-services" version "4.4.1" apply false/' android/settings.gradle || true
           
-          # Firebase config - app/build.gradle
-          sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/' android/app/build.gradle || true
-          
-          # Eski yapılar için fallback Firebase configurations
-          sed -i 's/apply plugin: "com.android.application"/apply plugin: "com.android.application"\napply plugin: "com.google.gms.google-services"/' android/app/build.gradle || true
-          sed -i 's/dependencies {/dependencies {\n        classpath "com.google.gms:google-services:4.4.1"/' android/build.gradle || true
-
-          # MinSdkVersion: Firebase için 23 gerekiyor
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' android/app/build.gradle || true
-
-          # compileSdkVersion ve targetSdkVersion'ı ayarla (app/build.gradle)
-          sed -i 's/compileSdk flutter.compileSdkVersion/compileSdk 35/' android/app/build.gradle || true
-          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 35/' android/app/build.gradle || true
-          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 35/' android/app/build.gradle || true
-
           # flutter.sdk yolunu local.properties'e yaz (geolocator gibi plugin'ler buna ihtiyaç duyar)
-          FLUTTER_BIN=$(which flutter)
-          FLUTTER_SDK=$(dirname $(dirname $FLUTTER_BIN))
-          echo "flutter.sdk=$FLUTTER_SDK" >> android/local.properties
+          FLUTTER_SDK=$(flutter sdk-path)
+          echo "flutter.sdk=$FLUTTER_SDK" > android/local.properties
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
-          echo "Flutter SDK path: $FLUTTER_SDK"
+          
+          # Root build.gradle düzenleme (ext properties ve buildscript)
+          cat <<EOF > android/build.gradle
+          buildscript {
+              ext.kotlin_version = '1.9.24'
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.1'
+                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:\$kotlin_version"
+                  classpath 'com.google.gms:google-services:4.4.1'
+              }
+          }
+          
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              // Geolocator ve diğer plugin'lerin SDK 35 hatalarını çözmek için ext tanımları
+              ext {
+                  compileSdkVersion = 35
+                  targetSdkVersion = 35
+                  minSdkVersion = 23
+              }
+          }
+          
+          rootProject.buildDir = "../build"
+          subprojects {
+              project.buildDir = "\${rootProject.buildDir}/\${project.name}"
+          }
+          subprojects {
+              project.evaluationDependsOn(":app")
+          }
+          
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          EOF
 
-          # ext değerlerini de ekle (Global Gradle özellikleri)
-          echo "ext.compileSdkVersion = 35" >> android/build.gradle
-          echo "ext.minSdkVersion = 23" >> android/build.gradle
-          echo "ext.targetSdkVersion = 35" >> android/build.gradle
+          # settings.gradle - Modern Flutter Loader + GMS
+          cat <<EOF > android/settings.gradle
+          pluginManagement {
+              def flutterSdkPath = {
+                  def properties = new Properties()
+                  file("local.properties").withInputStream { properties.load(it) }
+                  def flutterSdkPath = properties.getProperty("flutter.sdk")
+                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
+                  return flutterSdkPath
+              }()
 
+              includeBuild("\$flutterSdkPath/packages/flutter_tools/gradle")
+
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          plugins {
+              id "dev.flutter.flutter-gradle-plugin" version "1.0.0" apply false
+              id "com.android.application" version "8.2.1" apply false
+              id "org.jetbrains.kotlin.android" version "1.9.24" apply false
+              id "com.google.gms.google-services" version "4.4.1" apply false
+          }
+
+          include ":app"
+          EOF
+
+          # app/build.gradle düzenleme (Namespace ve SDK tanımları)
+          cat <<EOF > android/app/build.gradle
+          plugins {
+              id "com.android.application"
+              id "com.google.gms.google-services"
+              id "kotlin-android"
+              id "dev.flutter.flutter-gradle-plugin"
+          }
+
+          android {
+              namespace "com.gorbul.app"
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId "com.gorbul.app"
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName "1.0.0"
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.debug
+                      minifyEnabled false
+                      shrinkResources false
+                  }
+              }
+          }
+
+          flutter {
+              source "../.."
+          }
+          EOF
+
+          # Android Lisanslarını Onayla (Build başarısı için kritik)
+          yes | flutter doctor --android-licenses || true
 
       # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)
       - name: Build APK
-        run: flutter build apk --release --build-name=1.0.0 --build-number=1
+        run: flutter build apk --release --build-name=1.0.0 --build-number=1 --no-tree-shake-icons
 
       - name: Get Version Tag
         id: version
