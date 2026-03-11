@@ -277,7 +277,7 @@ class User {
   String password; // mutable — şifre değiştirme için
   final String schoolName;
   final bool isManager;
-  final String avatarEmoji;  // Anonim profil için — isim yerine gösterilir
+  String avatarEmoji;  // Anonim profil için — isim yerine gösterilir (mutable)
   final String nickname;     // Anonim takma ad (otomatik üretilir)
 
   User({
@@ -1978,7 +1978,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           controller: _nicknameController,
                           decoration: InputDecoration(
                             labelText: 'Anonim Takma Ad (Nickname)',
-                            prefixIcon: const Icon(Icons.mask_outlined),
+                            prefixIcon: const Icon(Icons.badge),
                             suffixIcon: IconButton(
                               icon: const Icon(Icons.refresh),
                               onPressed: _generateNickname,
@@ -4714,10 +4714,11 @@ class DetailScreen extends StatelessWidget {
                   });
                 }
                 if (context.mounted) {
-                  Navigator.push(context, MaterialPageRoute(
+                   Navigator.push(context, MaterialPageRoute(
                     builder: (_) => ChatDetailScreen(
                       chatId: chatId,
                       otherUserName: listing.ownerName,
+                      otherAvatar: listing.ownerAvatar,
                       otherUserId: otherId,
                     ),
                   ));
@@ -5413,10 +5414,10 @@ class AnonymousProfileScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: Colors.blue[200]!),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.shield_outlined, color: Colors.blue),
-                    SizedBox(width: 12),
+                    const Icon(Icons.shield_outlined, color: Colors.blue),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Bu profil GörBul tarafından doğrulanmıştır. Kullanıcı bilgileri anonim olarak saklanmaktadır.',
