@@ -74,7 +74,7 @@ jobs:
 
       # Mimari bazlı split APK'lar (Boyutu %70 azaltır ve daha hızlı iner)
       - name: Build APK (Optimized)
-        run: flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols --build-name=1.0.0 --build-number=1
+        run: flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
       - name: Get Version Tag
         id: version
