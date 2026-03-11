@@ -7,11 +7,10 @@ environment:
   sdk: '>=3.2.3 <4.0.0'
 
 dependencies:
-  share_plus: ^10.1.2
-  path_provider: ^2.1.5
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
+  share_plus: ^10.1.2
   image_picker: any
   flutter_image_compress: any
   permission_handler: any
@@ -31,8 +30,6 @@ dependencies:
   flutter_local_notifications: any
 
 dev_dependencies:
-  share_plus: ^10.1.2
-  path_provider: ^2.1.5
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
