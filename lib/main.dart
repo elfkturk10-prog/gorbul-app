@@ -17,6 +17,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:share_plus/share_plus.dart';
 // Not: google_fonts eklenirse: import 'package:google_fonts/google_fonts.dart';
 
 // Arka plan mesaj işleyicisi (FCM için şart)
@@ -273,9 +274,11 @@ class User {
   final String surname;
   final String tc;
   final String email;
-  final String password;
+  String password; // mutable — şifre değiştirme için
   final String schoolName;
   final bool isManager;
+  final String avatarEmoji;  // Anonim profil için — isim yerine gösterilir
+  final String nickname;     // Anonim takma ad (otomatik üretilir)
 
   User({
     required this.id,
@@ -286,6 +289,8 @@ class User {
     required this.password,
     required this.schoolName,
     this.isManager = false,
+    this.avatarEmoji = '🦊',
+    this.nickname = '',
   });
 
   Map<String, dynamic> toJson() {
@@ -298,6 +303,8 @@ class User {
       'password': password,
       'schoolName': schoolName,
       'isManager': isManager,
+      'avatarEmoji': avatarEmoji,
+      'nickname': nickname,
     };
   }
 
@@ -311,9 +318,12 @@ class User {
       password: json['password'] ?? '',
       schoolName: json['schoolName'] ?? 'Belirtilmedi',
       isManager: json['isManager'] ?? false,
+      avatarEmoji: json['avatarEmoji'] ?? '🦊',
+      nickname: json['nickname'] ?? '',
     );
   }
 }
+
 
 class Listing {
   final String id;
@@ -327,11 +337,12 @@ class Listing {
   final File? imageFile; // Yerel test için
   final String securityQuestion;
   final String securityAnswer;
-  final bool isUrgent;
   final String ownerName;
   final String rewardAmount;
   final String schoolName;
   final String ownerId;
+  final String ownerAvatar; // Anonim kimlik
+  final String ownerNickname; // Anonim kimlik
   final String status; // 'active' veya 'resolved'
 
   Listing({
@@ -351,6 +362,8 @@ class Listing {
     this.rewardAmount = '',
     this.schoolName = 'Belirtilmedi',
     required this.ownerId,
+    this.ownerAvatar = '🦊',
+    this.ownerNickname = '',
     this.status = 'active',
   }) : expiryDate = expiryDate ?? date.add(const Duration(days: 15));
 
@@ -372,6 +385,8 @@ class Listing {
       'rewardAmount': rewardAmount,
       'schoolName': schoolName,
       'ownerId': ownerId,
+      'ownerAvatar': ownerAvatar,
+      'ownerNickname': ownerNickname,
       'status': status,
     };
   }
@@ -395,6 +410,8 @@ class Listing {
       rewardAmount: json['rewardAmount'] ?? '',
       schoolName: json['schoolName'] ?? 'Belirtilmedi',
       ownerId: json['ownerId'] ?? '',
+      ownerAvatar: json['ownerAvatar'] ?? '🦊',
+      ownerNickname: json['ownerNickname'] ?? '',
       status: json['status'] ?? 'active',
     );
   }
@@ -692,6 +709,42 @@ class DataStore {
     } catch (e) {
       print("Firebase user save error: $e");
     }
+  }
+
+  // Brute-force koruması
+  static final Map<String, int> _loginAttempts = {};
+  static final Map<String, DateTime> _lockoutUntil = {};
+  // Küfür filtresi & ban tracking
+  static final Map<String, int> profanityWarnings = {};
+  static final Map<String, DateTime> chatBanUntil = {};
+  static const int _maxAttempts = 5;
+  static const Duration _lockoutDuration = Duration(minutes: 15);
+
+  /// Giriş denemesi sayısını artır. Kilitliyse hata mesajı döner.
+  static String? checkLoginThrottle(String identifier) {
+    final lockout = _lockoutUntil[identifier];
+    if (lockout != null && DateTime.now().isBefore(lockout)) {
+      final remaining = lockout.difference(DateTime.now()).inMinutes + 1;
+      return 'Hesabınız $remaining dakika süreyle kilitlendi. Lütfen bekleyin.';
+    }
+    return null;
+  }
+
+  static void recordFailedLogin(String identifier) {
+    _loginAttempts[identifier] = (_loginAttempts[identifier] ?? 0) + 1;
+    if (_loginAttempts[identifier]! >= _maxAttempts) {
+      _lockoutUntil[identifier] = DateTime.now().add(_lockoutDuration);
+      _loginAttempts[identifier] = 0;
+      NotificationService.showLocalNotification(
+        '⚠️ Hesap Geçici Olarak Kilitlendi',
+        'Çok fazla başarısız giriş denemesi. 15 dakika sonra tekrar deneyin.',
+      );
+    }
+  }
+
+  static void clearLoginAttempts(String identifier) {
+    _loginAttempts.remove(identifier);
+    _lockoutUntil.remove(identifier);
   }
 
   static Future<void> setLoggedIn(bool value, {User? user}) async {
@@ -1234,6 +1287,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       String tc = _tcController.text;
       String password = _passwordController.text;
 
+      // Brute-force kilitleme kontrolü
+      final throttleMsg = DataStore.checkLoginThrottle(tc);
+      if (throttleMsg != null) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(throttleMsg), backgroundColor: Colors.red));
+        return;
+      }
+
       User? user;
       try {
         user = DataStore.registeredUsers.firstWhere(
@@ -1247,6 +1308,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       setState(() => _isLoading = false);
 
       if (user != null) {
+        DataStore.clearLoginAttempts(tc);
         await DataStore.setLoggedIn(true, user: user);
         
         // HOŞ GELDİN BİLDİRİMİ
@@ -1260,9 +1322,14 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           MaterialPageRoute(builder: (context) => const MainScreen()),
         );
       } else {
+        DataStore.recordFailedLogin(tc);
+        final attempts = DataStore._loginAttempts[tc] ?? 0;
+        final attemptsLeft = DataStore._maxAttempts - attempts;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Hatalı T.C. Kimlik No veya Şifre!'),
+          SnackBar(
+            content: Text(attemptsLeft > 0
+              ? 'Hatalı T.C. Kimlik No veya Şifre! ($attemptsLeft deneme hakkın kaldı)'
+              : '⚠️ Hesabınız 15 dakika kilitlendi.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1779,20 +1846,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _passwordConfirmController = TextEditingController();
   final _schoolNameController = TextEditingController();
+  final _nicknameController = TextEditingController();
   
   bool _isLoading = false;
-  bool _isTeacher = false; // Yönetici/Öğretmen mi?
+  bool _isTeacher = false;
   List<String> _dynamicSchools = [];
   String? _selectedSchool;
+
+  static const List<String> _nickPrefixes = ['Gizli','Anonim','Kayıp','Gizemli','Hızlı','Sessiz','Cesur','Akıllı'];
+  static const List<String> _nickAnimals = ['Tilki','Kurt','Aslan','Kaplan','Ayı','Panda','Kartal','Baykuş','Ejder','Anka','Yunus','Köpek Balığı'];
+
+  void _generateNickname() {
+    final now = DateTime.now();
+    final prefix = _nickPrefixes[now.millisecond % _nickPrefixes.length];
+    final animal = _nickAnimals[now.microsecond % _nickAnimals.length];
+    final num = (now.millisecondsSinceEpoch % 999) + 1;
+    setState(() {
+      _nicknameController.text = '$prefix$animal#$num';
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     _loadDynamicSchools();
+    _generateNickname(); // Varsayılan bir nickname ata
   }
 
   void _loadDynamicSchools() {
-    // Sadece Teacher/Manager olarak kayıtlı kullanıcıların okullarını benzersiz olarak topla
     final schools = DataStore.registeredUsers
         .where((u) => u.isManager && u.schoolName.isNotEmpty)
         .map((u) => u.schoolName)
@@ -1810,41 +1891,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void _register() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
-      
       String tc = _tcController.text;
-      
-      // TC Kimlik No ile kayıtlı kullanıcı var mı kontrol et
       bool userExists = DataStore.registeredUsers.any((u) => u.tc == tc);
-      
       await Future.delayed(const Duration(seconds: 1)); // UX
       
       if (!mounted) return;
       setState(() => _isLoading = false);
 
       if (userExists) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Bu T.C. Kimlik No sisteme zaten kayıtlı!'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bu T.C. Kimlik No sisteme zaten kayıtlı!'), backgroundColor: Colors.red));
         return;
       }
 
-      // Eğer öğretmen değilse okul listesinden seçim yapması zorunlu
       if (!_isTeacher && (_dynamicSchools.isEmpty || _selectedSchool == null)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Kayıtlı okul bulunamadı! Önce okul yöneticinizin sisteme kayıt olması gerekmektedir.'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Kayıtlı okul bulunamadı! Önce okul yöneticinizin sisteme kayıt olması gerekmektedir.'), backgroundColor: Colors.red));
         return;
       }
 
       String userSchoolName = _isTeacher ? _schoolNameController.text.trim().toUpperCase() : _selectedSchool!;
+      String finalNickname = _nicknameController.text.trim();
+      if (finalNickname.isEmpty) finalNickname = 'Kullanıcı#${DateTime.now().millisecond}';
 
-      // Yeni kullanıcı oluştur
       User newUser = User(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         name: _nameController.text.trim(),
@@ -1854,26 +1921,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: hashPassword(_passwordController.text.trim()),
         schoolName: userSchoolName,
         isManager: _isTeacher,
+        avatarEmoji: '👤', // Geçici avatar, Setup ekranında seçilecek
+        nickname: finalNickname,
       );
 
-      // Datastore'a kaydet
-      await DataStore.registerUser(newUser);
-
-      // HOŞ GELDİN BİLDİRİMİ
-      NotificationService.showLocalNotification(
-        'GörBul Ailesine Hoş Geldin! ✨',
-        '${newUser.name}, kaydın başarıyla tamamlandı. Artık güvenli ağın bir parçasısın!',
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Kayıt Başarılı! Cihaz güvenliği sağlandı, giriş yapabilirsiniz.'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // Kayıt bitince giriş ekranına geri dön
-      Navigator.pop(context);
+      // Kayıt tamamlandıktan sonra doğrudan profile setup ekranına yönlendir
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => ProfileSetupScreen(user: newUser)));
     }
   }
 
@@ -1884,10 +1937,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -1897,14 +1947,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             children: [
               const Icon(Icons.person_add_alt_1, size: 80, color: Colors.white),
               const SizedBox(height: 16),
-              const Text(
-                'Aramıza Katıl',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.0),
-              ),
-              const Text(
-                'GörBul Güvenlik Ağına Kayıt Olun',
-                style: TextStyle(color: Colors.white70, fontSize: 14),
-              ),
+              const Text('Aramıza Katıl', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.0)),
+              const Text('GörBul Güvenlik Ağına Kayıt Olun', style: TextStyle(color: Colors.white70, fontSize: 14)),
               const SizedBox(height: 32),
 
               Card(
@@ -1920,71 +1964,67 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         // AD & SOYAD (Yan yana)
                         Row(
                           children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: _nameController,
-                                decoration: const InputDecoration(labelText: 'Ad', prefixIcon: Icon(Icons.person)),
-                                validator: (v) => v!.isEmpty ? 'Ad gerekli' : null,
-                              ),
-                            ),
+                            Expanded(child: TextFormField(controller: _nameController, decoration: const InputDecoration(labelText: 'Ad', prefixIcon: Icon(Icons.person)), validator: (v) => v!.isEmpty ? 'Ad gerekli' : null)),
                             const SizedBox(width: 16),
-                            Expanded(
-                              child: TextFormField(
-                                controller: _surnameController,
-                                decoration: const InputDecoration(labelText: 'Soyad'),
-                                validator: (v) => v!.isEmpty ? 'Soyad gerekli' : null,
-                              ),
-                            ),
+                            Expanded(child: TextFormField(controller: _surnameController, decoration: const InputDecoration(labelText: 'Soyad'), validator: (v) => v!.isEmpty ? 'Soyad gerekli' : null)),
                           ],
                         ),
                         const SizedBox(height: 16),
 
-                        // YÖNETİCİ/ÖĞRETMEN SEÇİMİ (DINAMIK OKUL İÇİN)
+                        // ÖZEL NICKNAME ALANI
+                        TextFormField(
+                          controller: _nicknameController,
+                          decoration: InputDecoration(
+                            labelText: 'Anonim Takma Ad (Nickname)',
+                            prefixIcon: const Icon(Icons.mask_outlined),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.refresh),
+                              onPressed: _generateNickname,
+                              tooltip: 'Rastgele Oluştur',
+                            ),
+                            helperText: 'İlanlarda ve mesajlarda bu isim görünecek.',
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) return 'Lütfen bir takma ad belirleyin';
+                            if (value.length < 3) return 'En az 3 karakter olmalı';
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // YÖNETİCİ/ÖĞRETMEN SEÇİMİ
                         SwitchListTile(
                           title: const Text('Yönetici / Öğretmen Kaydı', style: TextStyle(fontWeight: FontWeight.bold)),
                           subtitle: const Text('Kendi okul portalınızı oluşturun', style: TextStyle(fontSize: 12)),
                           value: _isTeacher,
                           activeColor: const Color(0xFF0A1F44),
-                          onChanged: (val) {
-                            setState(() {
-                              _isTeacher = val;
-                            });
-                          },
+                          onChanged: (val) => setState(() => _isTeacher = val),
                         ),
                         const SizedBox(height: 8),
 
-                        // OKUL KISMI (Duruma göre dinamik)
+                        // OKUL KISMI
                         _isTeacher 
                           ? TextFormField(
                               controller: _schoolNameController,
                               textCapitalization: TextCapitalization.characters,
-                              decoration: const InputDecoration(
-                                labelText: 'Okulunuzun Kısaltması / Portal Kodu (Örn: BAL)', 
-                                prefixIcon: Icon(Icons.school)
-                              ),
+                              decoration: const InputDecoration(labelText: 'Okulunuzun Kısaltması / Portal Kodu (Örn: BAL)', prefixIcon: Icon(Icons.school)),
                               validator: (v) => v!.isEmpty ? 'Portal Kodu belirlemeniz gerekli' : null,
                             )
                           : _dynamicSchools.isEmpty 
                             ? Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                                child: const Text(
-                                  'Sisteme kayıtlı portal bulunamadı. Lütfen yöneticinizin portal açmasını bekleyin.',
-                                  style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
-                                  textAlign: TextAlign.center,
-                                ),
+                                child: const Text('Sisteme kayıtlı portal bulunamadı. Lütfen yöneticinizin portal açmasını bekleyin.', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13), textAlign: TextAlign.center),
                               )
                             : DropdownButtonFormField<String>(
                                 value: _selectedSchool,
                                 decoration: const InputDecoration(labelText: 'Portal Kodunuz (Mevcut Portallar)', prefixIcon: Icon(Icons.school)),
                                 items: _dynamicSchools.map((s) => DropdownMenuItem(value: s, child: Text(s, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)))).toList(),
-                                onChanged: (val) {
-                                  if (val != null) setState(() => _selectedSchool = val);
-                                },
+                                onChanged: (val) { if (val != null) setState(() => _selectedSchool = val); },
                               ),
                         const SizedBox(height: 16),
 
-                        // TC KİMLİK (Senin Algoritmanla Korunuyor)
+                        // TC KİMLİK
                         TextFormField(
                           controller: _tcController,
                           keyboardType: TextInputType.number,
@@ -1998,14 +2038,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // GERÇEK MAİL KONTROLÜ (Harbici Regex)
+                        // E-POSTA
                         TextFormField(
                           controller: _emailController,
                           keyboardType: TextInputType.emailAddress,
                           decoration: const InputDecoration(labelText: 'E-Posta Adresi', prefixIcon: Icon(Icons.email)),
                           validator: (value) {
                             if (value == null || value.isEmpty) return 'Mail gerekli';
-                            // Harbici mail formatı kontrolü
                             if (!RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+-/=?^_`{|}~]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(value)) {
                               return 'Geçerli bir mail girin patron';
                             }
@@ -2014,6 +2053,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 16),
 
+                        // ŞİFRE
                         TextFormField(
                           controller: _passwordController,
                           obscureText: true,
@@ -2025,7 +2065,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // ŞİFRE (TEKRAR) EKLENDİ
+                        // ŞİFRE (TEKRAR)
                         TextFormField(
                           controller: _passwordConfirmController,
                           obscureText: true,
@@ -2038,7 +2078,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 24),
 
-                        // KAYIT BUTONU
+                        // İLERİ BUTONU
                         SizedBox(
                           height: 56,
                           child: ElevatedButton(
@@ -2049,7 +2089,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                             ),
                             child: _isLoading 
                                 ? const CircularProgressIndicator(color: Colors.white)
-                                : const Text('GÜVENLİ KAYIT OL', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                : const Text('DEVAM ET ➡️', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],
@@ -2066,7 +2106,147 @@ class _RegisterScreenState extends State<RegisterScreen> {
 }
 
 // ---------------------------------------------------------------------------
+// 2.6. PROFILE SETUP SCREEN (Avatar ve Onay)
+// ---------------------------------------------------------------------------
+class ProfileSetupScreen extends StatefulWidget {
+  final User user;
+  const ProfileSetupScreen({super.key, required this.user});
+
+  @override
+  State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
+}
+
+class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
+  String _selectedAvatar = '🦊';
+  bool _isLoading = false;
+
+  static const List<String> _avatarList = [
+    '🦊','🐺','🦁','🐯','🐻','🐼','🐨','🦝','🐸','🦆',
+    '🦉','🦅','🦋','🐙','🦑','🦀','🌊','🔥','⚡','🌈',
+    '🎭','🎨','🎸','🎮','🚀','🌟','💎','🏆','❄️','🌸',
+    '🍀','🌵','🦚','🦜','🐠','🦈','🦕','🤖','👾','🎃',
+  ];
+
+  void _completeSetup() async {
+    setState(() => _isLoading = true);
+    
+    // Kullanıcıya seçtiği avatarı ata
+    final finalUser = widget.user;
+    finalUser.avatarEmoji = _selectedAvatar;
+    
+    // Veritabanına yaz
+    await DataStore.registerUser(finalUser);
+    
+    NotificationService.showLocalNotification(
+        'Profil Oluşturuldu! ✨',
+        '${finalUser.nickname}, kurulum başarıyla tamamlandı. Hoş geldin!',
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profil başarıyla oluşturuldu! Şimdi giriş yapabilirsiniz.'), backgroundColor: Colors.green));
+    
+    // Login ekranına dön
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text('Profilini Tamamla', style: TextStyle(color: Colors.black)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.black),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Harika bir Nickname seçtin:', style: TextStyle(fontSize: 16, color: Colors.grey)),
+              const SizedBox(height: 8),
+              Text(widget.user.nickname, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF0A1F44))),
+              const SizedBox(height: 32),
+              
+              const Text('Şimdi seni temsil edecek bir Avatar seç:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              
+              // Seçili avatar büyük önizleme
+              Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0A1F44).withOpacity(0.08),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFF0A1F44), width: 4),
+                  ),
+                  child: Center(child: Text(_selectedAvatar, style: const TextStyle(fontSize: 50))),
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Avatar grid
+              Expanded(
+                child: GridView.builder(
+                  itemCount: _avatarList.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 6,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                  ),
+                  itemBuilder: (_, i) {
+                    final a = _avatarList[i];
+                    final isSelected = a == _selectedAvatar;
+                    return GestureDetector(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() => _selectedAvatar = a);
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        decoration: BoxDecoration(
+                          color: isSelected ? const Color(0xFF0A1F44).withOpacity(0.15) : Colors.grey[100],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isSelected ? const Color(0xFF0A1F44) : Colors.transparent, width: 2),
+                        ),
+                        child: Center(child: Text(a, style: const TextStyle(fontSize: 24))),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 56,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _completeSetup,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0A1F44),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: _isLoading 
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('PROFİLİ OLUŞTUR ✓', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 3. MAIN SCREEN (BOTTOM NAVIGATION BAR)
+
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Hafif sayfa geçişi (slide + fade, 200ms)
@@ -2351,17 +2531,86 @@ class _HomeScreenState extends State<HomeScreen> {
     _filterListings();
   }
 
-  // Bildirim Paneli (Phase 11)
+  // Bildirim Paneli — gerçek verilerle dolu
   void _showNotificationsPanel(BuildContext context) {
-    final List<Map<String, dynamic>> notifications = [];
+    final now = DateTime.now();
+    final myListings = DataStore.listings
+        .where((l) => l.ownerId == DataStore.currentUser?.id)
+        .toList();
+    final vaultCount = DataStore.vaultItems.length;
+
+    final List<Map<String, dynamic>> notifications = [
+      {
+        'icon': Icons.waving_hand,
+        'color': Colors.indigo,
+        'title': 'GörBul\'a Hoş Geldin 👋',
+        'body': 'Güvenli, doğrulanmış kayıp-bulundu platformuna bağlandın.',
+        'time': '${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+        'read': true,
+      },
+      {
+        'icon': Icons.radar,
+        'color': Colors.teal,
+        'title': 'Radar Aktif 🔍',
+        'body': 'Yapay zeka çevrenizdeki ${DataStore.listings.length} ilanı analiz ediyor.',
+        'time': 'Az önce',
+        'read': false,
+      },
+      if (myListings.isNotEmpty)
+        {
+          'icon': Icons.campaign,
+          'color': Colors.blue,
+          'title': '${myListings.length} İlanın Yayında',
+          'body': '${myListings.first.title}${myListings.length > 1 ? " ve ${myListings.length - 1} ilan daha aktif." : " ilanın herkese görünüyor."}',
+          'time': 'Bugün',
+          'read': false,
+        },
+      if (vaultCount == 0)
+        {
+          'icon': Icons.inventory_2_outlined,
+          'color': Colors.orange,
+          'title': 'Dijital Dolabın Boş 📦',
+          'body': 'Eşyalarını kayıt altına al, kaybolursa tek tıkla ilan ver!',
+          'time': 'Öneri',
+          'read': true,
+        }
+      else
+        {
+          'icon': Icons.shield,
+          'color': Colors.green,
+          'title': 'Dolabın Güvende 🛡️',
+          'body': '$vaultCount eşya güvenle yedeklendi.',
+          'time': 'Aktif',
+          'read': true,
+        },
+      {
+        'icon': Icons.lock,
+        'color': Colors.purple,
+        'title': 'Güvenlik Sertifikası Aktif ✅',
+        'body': 'T.C. kimliğin doğrulandı. Hesabın korunuyor.',
+        'time': 'Kalıcı',
+        'read': true,
+      },
+      {
+        'icon': Icons.notifications_active,
+        'color': Colors.redAccent,
+        'title': 'Günlük Kontrol Hatırlatması',
+        'body': 'Yeni eşleşme olabilir — ilanlarını kontrol et!',
+        'time': 'Yarın',
+        'read': true,
+      },
+    ];
+
+    final unreadCount = notifications.where((n) => n['read'] == false).length;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
+        initialChildSize: 0.65,
+        maxChildSize: 0.92,
+        minChildSize: 0.4,
         builder: (_, controller) => Container(
           decoration: BoxDecoration(
             color: Theme.of(context).scaffoldBackgroundColor,
@@ -2372,29 +2621,60 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 8),
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 16),
-              const Text('Bildirimler', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Expanded(
-                child: notifications.isEmpty
-                  ? const Center(child: Text('Henüz yeni bir bildiriminiz yok.', style: TextStyle(color: Colors.grey)))
-                  : ListView.separated(
-                      controller: controller,
-                      itemCount: notifications.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
-                      itemBuilder: (_, index) {
-                        final n = notifications[index];
-                        return ListTile(
-                          leading: Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(color: (n['color'] as Color).withOpacity(0.1), shape: BoxShape.circle),
-                            child: Icon(n['icon'] as IconData, color: n['color'] as Color, size: 22),
-                          ),
-                          title: Text(n['title'] as String, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text(n['body'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
-                          trailing: Text(n['time'] as String, style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                        );
-                      },
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    const Text('Bildirimler', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 10),
+                    if (unreadCount > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(20)),
+                        child: Text('$unreadCount yeni', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Kapat', style: TextStyle(color: Colors.grey)),
                     ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  controller: controller,
+                  itemCount: notifications.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
+                  itemBuilder: (_, index) {
+                    final n = notifications[index];
+                    final isUnread = n['read'] == false;
+                    return Container(
+                      color: isUnread ? (n['color'] as Color).withOpacity(0.04) : null,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(color: (n['color'] as Color).withOpacity(0.12), shape: BoxShape.circle),
+                          child: Icon(n['icon'] as IconData, color: n['color'] as Color, size: 22),
+                        ),
+                        title: Text(n['title'] as String, style: TextStyle(fontWeight: isUnread ? FontWeight.bold : FontWeight.w500, fontSize: 14)),
+                        subtitle: Text(n['body'] as String, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(n['time'] as String, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                            if (isUnread) ...[
+                              const SizedBox(height: 4),
+                              Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ],
           ),
@@ -2402,6 +2682,9 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+
+
 
   // Canlı İstatistik Kartı (Phase 11)
   Widget _buildLiveStatCard(String label, String value, IconData icon, Color color) {
@@ -2455,6 +2738,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Dinamik Selamlama Mesajı
   String _getGreeting() {
     final hour = DateTime.now().hour;
+    if (hour < 6) return 'İyi Geceler 🌜';
     if (hour < 12) return 'Günaydın ☀️';
     if (hour < 18) return 'İyi Günler 🌤️';
     return 'İyi Akşamlar 🌙';
@@ -3545,6 +3829,8 @@ class _AddListingScreenState extends State<AddListingScreen> {
         schoolName: DataStore.currentUser?.schoolName ?? 'Belirtilmedi',
         ownerId: DataStore.currentUser?.id ?? 'bilinmiyor',
         ownerName: '${DataStore.currentUser?.name} ${DataStore.currentUser?.surname}',
+        ownerAvatar: DataStore.currentUser?.avatarEmoji ?? '🦊',
+        ownerNickname: DataStore.currentUser?.nickname ?? 'Anonim',
       );
 
       await DataStore.addListing(newListing);
@@ -4403,9 +4689,51 @@ class DetailScreen extends StatelessWidget {
                 'Eşleşme sağlandı. İlan sahibiyle iletişime geçebilirsiniz.'),
             const SizedBox(height: 24),
             ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-              child: const Text('İLETİŞİME GEÇ'),
+              onPressed: () async {
+                Navigator.pop(c); // bottom sheet kapat
+                final me = DataStore.currentUser;
+                if (me == null) return;
+                final otherId = listing.ownerId;
+                if (otherId == me.id) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Bu senin kendi ilanın!')));
+                  return;
+                }
+                final ids = [me.id, otherId]..sort();
+                final chatId = '${ids[0]}_${ids[1]}';
+                final chatRef = FirebaseFirestore.instance.collection('chats').doc(chatId);
+                final chatSnap = await chatRef.get();
+                if (!chatSnap.exists) {
+                  await chatRef.set({
+                    'participants': [me.id, otherId],
+                    'participantNames': [me.name, listing.ownerName],
+                    'lastMessage': '✅ Eşya doğrulandı, görüşelim!',
+                    'lastMessageAt': Timestamp.now(),
+                  });
+                }
+                if (context.mounted) {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ChatDetailScreen(
+                      chatId: chatId,
+                      otherUserName: listing.ownerName,
+                      otherUserId: otherId,
+                    ),
+                  ));
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.chat_bubble, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('HEMEN MESAJ AT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
             ),
           ],
         ),
@@ -4471,6 +4799,15 @@ class DetailScreen extends StatelessWidget {
                 ),
               IconButton(
                 icon: const Icon(Icons.share),
+                tooltip: 'İlanı Paylaş',
+                onPressed: () {
+                  final text = 'GörBul\\'da bir ilan var: "${listing.title}" - ${listing.location}\\n\\nDetaylar için GörBul uygulamasına gözat!';
+                  Share.share(text);
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.print),
+                tooltip: 'Poster Oluştur (QR)',
                 onPressed: () {
                   showDialog(
                     context: context,
@@ -4612,47 +4949,55 @@ class DetailScreen extends StatelessWidget {
                       child: Divider(),
                     ),
 
-                    // İlan Sahibi Profili ve Güven Rozetleri (Letgo Tarzı + Banka Güveni)
+                    // İlan Sahibi Profili ve Güven Rozetleri (Anonim)
                     Row(
                       children: [
-                        const CircleAvatar(
-                          radius: 24,
-                          backgroundColor: Color(0xFF0A1F44),
-                          child: Icon(Icons.person, color: Colors.white),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => AnonymousProfileScreen(
+                                  userId: listing.ownerId,
+                                  nickname: listing.ownerNickname,
+                                  avatar: listing.ownerAvatar,
+                                  schoolName: listing.schoolName,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Row(
                             children: [
-                              Text(listing.ownerName,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16)),
-                              const SizedBox(height: 2),
-                              Row(
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor: const Color(0xFF0A1F44).withOpacity(0.1),
+                                child: Text(listing.ownerAvatar, style: const TextStyle(fontSize: 24)),
+                              ),
+                              const SizedBox(width: 16),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(Icons.shield,
-                                      color: Colors.green, size: 14),
-                                  const SizedBox(width: 4),
-                                  const Text('T.C. Onaylı',
-                                      style: TextStyle(
-                                          color: Colors.green,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold)),
-                                  const SizedBox(width: 8),
-                                  Icon(Icons.star,
-                                      color: Colors.amber[600], size: 14),
-                                  Text(' 5.0 Skor',
-                                      style: TextStyle(
-                                          color: Colors.amber[800],
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold)),
+                                  Text(listing.ownerNickname.isEmpty ? 'Anonim' : listing.ownerNickname,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 15)),
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.shield, color: Colors.green, size: 12),
+                                      const SizedBox(width: 4),
+                                      const Text('Onaylı', style: TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold)),
+                                      const SizedBox(width: 8),
+                                      Icon(Icons.star, color: Colors.amber[600], size: 12),
+                                      const Text(' 5.0', style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ],
                           ),
                         ),
+                        const Spacer(),
                         OutlinedButton.icon(
                           onPressed: () async {
                             final me = DataStore.currentUser;
@@ -4660,7 +5005,6 @@ class DetailScreen extends StatelessWidget {
                             final otherId = listing.ownerId;
                             if (otherId == me.id) return;
 
-                            // Deterministik chatId (iki kullanıcı arasında hep aynı)
                             final ids = [me.id, otherId]..sort();
                             final chatId = '${ids[0]}_${ids[1]}';
 
@@ -4669,7 +5013,8 @@ class DetailScreen extends StatelessWidget {
                             if (!chatSnap.exists) {
                               await chatRef.set({
                                 'participants': [me.id, otherId],
-                                'participantNames': [me.name, listing.ownerName],
+                                'participantNames': [me.nickname.isEmpty ? 'Kullanıcı' : me.nickname, listing.ownerNickname],
+                                'participantAvatars': [me.avatarEmoji, listing.ownerAvatar],
                                 'lastMessage': '',
                                 'lastMessageAt': Timestamp.now(),
                               });
@@ -4679,47 +5024,44 @@ class DetailScreen extends StatelessWidget {
                               Navigator.push(context, MaterialPageRoute(
                                 builder: (_) => ChatDetailScreen(
                                   chatId: chatId,
-                                  otherUserName: listing.ownerName,
+                                  otherUserName: listing.ownerNickname,
                                   otherUserId: otherId,
+                                  otherAvatar: listing.ownerAvatar,
                                 ),
                               ));
                             }
                           },
-                          icon: const Icon(Icons.chat_bubble_outline,
-                              size: 16, color: Color(0xFF0A1F44)),
+                          icon: const Icon(Icons.chat_bubble_outline, size: 14),
+                          label: const Text('Mesaj', style: TextStyle(fontSize: 12)),
                           style: OutlinedButton.styleFrom(
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20)),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             side: const BorderSide(color: Color(0xFF0A1F44)),
                           ),
-                          label: const Text('Mesaj At',
-                              style: TextStyle(color: Color(0xFF0A1F44))),
                         ),
-                        if (listing.latitude != null && listing.longitude != null)
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              final lat = listing.latitude!;
-                              final lng = listing.longitude!;
-                              // Google Maps yol tarifi URL'si - direkt navigasyon modu
-                              final uri = Uri.parse(
-                                'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
-                              );
-                              if (await canLaunchUrl(uri)) {
-                                await launchUrl(uri, mode: LaunchMode.externalApplication);
-                              }
-                            },
-                            icon: const Icon(Icons.directions, color: Colors.white, size: 16),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green[700],
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(20)),
-                            ),
-                            label: const Text('Yol Tarifi Al',
-                                style: TextStyle(color: Colors.white)),
-                          )
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
+                    if (listing.latitude != null && listing.longitude != null)
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            final lat = listing.latitude!;
+                            final lng = listing.longitude!;
+                            final uri = Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving");
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            }
+                          },
+                          icon: const Icon(Icons.directions, color: Colors.white, size: 16),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green[700],
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          label: const Text("Google Maps ile Yol Tarifi Getir", style: TextStyle(color: Colors.white)),
+                        ),
+                      ),
                     // Başarı Rozetleri (Badges) Alanı
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -4878,24 +5220,249 @@ class DetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildBadge(IconData icon, String text, MaterialColor color) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color[50], shape: BoxShape.circle),
-          child: Icon(icon, color: color[400], size: 20),
+  }
+}
+
+class AnonymousProfileScreen extends StatelessWidget {
+  final String userId;
+  final String nickname;
+  final String avatar;
+  final String schoolName;
+
+  const AnonymousProfileScreen({
+    super.key,
+    required this.userId,
+    required this.nickname,
+    required this.avatar,
+    required this.schoolName,
+  });
+
+  void _showReportDialog(BuildContext context) {
+    String? selectedReason;
+    final reasons = ['Taciz / Rahatsız Edici', 'Dolandırıcılık Şüphesi', 'Uygunsuz İçerik / Küfür', 'Spam', 'Diğer'];
+    
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.report_problem, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Kullanıcıyı Bildir'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Neden bu kullanıcıyı şikayet ediyorsunuz?', style: TextStyle(fontSize: 14)),
+              const SizedBox(height: 16),
+              ...reasons.map((r) => RadioListTile<String>(
+                title: Text(r, style: const TextStyle(fontSize: 13)),
+                value: r,
+                groupValue: selectedReason,
+                onChanged: (v) => setState(() => selectedReason = v),
+                contentPadding: EdgeInsets.zero,
+              )),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('İPTAL')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: selectedReason == null ? null : () async {
+                // Firebase'e şikayet kaydı
+                await FirebaseFirestore.instance.collection('reports').add({
+                  'reportedUserId': userId,
+                  'reporterUserId': DataStore.currentUser?.id,
+                  'reason': selectedReason,
+                  'at': Timestamp.now(),
+                });
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Şikayetiniz ekibimize iletildi. Teşekkürler.'),
+                    backgroundColor: Colors.green,
+                  ));
+                }
+              },
+              child: const Text('BİLDİR', style: TextStyle(color: Colors.white)),
+            ),
+          ],
         ),
-        const SizedBox(height: 4),
-        Text(text,
-            style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey[700],
-                fontWeight: FontWeight.w600)),
-      ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text('Anonim Profil', style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF0A1F44),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.report_gmailerrorred),
+            tooltip: 'Şikayet Et',
+            onPressed: () => _showReportDialog(context),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            // Üst Bölüm (Avatar & Nickname)
+            Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                color: Color(0xFF0A1F44),
+                borderRadius: BorderRadius.only(bottomLeft: Radius.circular(40), bottomRight: Radius.circular(40)),
+              ),
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 60,
+                    backgroundColor: Colors.white.withOpacity(0.1),
+                    child: Text(avatar, style: const TextStyle(fontSize: 60)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    nickname.isEmpty ? 'Anonim Kullanıcı' : nickname,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.school, color: Colors.white70, size: 16),
+                      const SizedBox(width: 8),
+                      Text(schoolName, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // İstatistikler
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  _buildStatCard('Eşleşme', '12', Icons.task_alt, Colors.green),
+                  const SizedBox(width: 16),
+                  _buildStatCard('Skor', '4.9', Icons.star, Colors.amber),
+                  const SizedBox(width: 16),
+                  _buildStatCard('Bağış', '₺250', Icons.favorite, Colors.red),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 32),
+            
+            // Rozetler Bölümü
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Başarı Rozetleri', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildLargeBadge('Dürüst İade', Icons.handshake, Colors.purple),
+                      _buildLargeBadge('Hızlı Yanıt', Icons.bolt, Colors.orange),
+                      _buildLargeBadge('Onaylı Hesap', Icons.verified_user, Colors.blue),
+                      _buildLargeBadge('Hayvan Dostu', Icons.pets, Colors.brown),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 40),
+            
+            // Hakkında / Güvenlik Notu
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.shield_outlined, color: Colors.blue),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Bu profil GörBul tarafından doğrulanmıştır. Kullanıcı bilgileri anonim olarak saklanmaktadır.',
+                        style: TextStyle(fontSize: 13, color: Colors.blueScale),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 60),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 8),
+            Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLargeBadge(String label, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
+        ],
+      ),
     );
   }
 }
+
+const Colors blueScale = Colors.blue; // Helper for older styles if any
 
 // Kücük yardımcı widget
 class ROWTitle extends StatelessWidget {
@@ -5273,34 +5840,74 @@ class ProfileScreen extends StatelessWidget {
               trailing: const Icon(Icons.chevron_right, color: Colors.grey),
               onTap: () {
                 HapticFeedback.selectionClick();
-                final myListings = DataStore.listings.where((l) => l.ownerId == DataStore.currentUser?.id).toList();
+                 final myListings = DataStore.listings.where((l) => l.ownerId == DataStore.currentUser?.id).toList();
                 showModalBottomSheet(
                   context: context,
+                  isScrollControlled: true,
                   shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-                  builder: (ctx) => Column(
-                    children: [
-                      const Padding(padding: EdgeInsets.all(16), child: Text('İlanlarım', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
-                      Expanded(
-                        child: myListings.isEmpty
-                            ? const Center(child: Text('Henüz ilan vermediniz.'))
-                            : ListView.builder(
-                                itemCount: myListings.length,
-                                itemBuilder: (ctx, i) {
-                                  final l = myListings[i];
-                                  return ListTile(
-                                    leading: Icon(l.status == 'resolved' ? Icons.check_circle : Icons.hourglass_top, color: l.status == 'resolved' ? Colors.green : Colors.blue),
-                                    title: Text(l.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                    subtitle: Text(l.location),
-                                    trailing: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(color: l.status == 'resolved' ? Colors.green : Colors.orange, borderRadius: BorderRadius.circular(10)),
-                                      child: Text(l.status == 'resolved' ? 'Çözüldü' : 'Aktif', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                                    ),
-                                  );
-                                },
-                              ),
+                  builder: (ctx) => StatefulBuilder(
+                    builder: (ctx, setSheetState) => DraggableScrollableSheet(
+                      initialChildSize: 0.6,
+                      maxChildSize: 0.9,
+                      expand: false,
+                      builder: (_, sc) => Column(
+                        children: [
+                          const Padding(padding: EdgeInsets.all(16), child: Text('İlanlarım', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18))),
+                          Expanded(
+                            child: myListings.isEmpty
+                                ? const Center(child: Text('Henüz ilan vermediniz.'))
+                                : ListView.builder(
+                                    controller: sc,
+                                    itemCount: myListings.length,
+                                    itemBuilder: (ctx, i) {
+                                      final l = myListings[i];
+                                      final isResolved = l.status == 'resolved';
+                                      return ListTile(
+                                        leading: Icon(isResolved ? Icons.check_circle : Icons.hourglass_top, color: isResolved ? Colors.green : Colors.blue),
+                                        title: Text(l.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                        subtitle: Text(l.location),
+                                        trailing: isResolved
+                                            ? Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(10)),
+                                                child: const Text('Çözüldü', style: TextStyle(color: Colors.white, fontSize: 11)),
+                                              )
+                                            : ElevatedButton(
+                                                onPressed: () async {
+                                                  try {
+                                                    await FirebaseFirestore.instance
+                                                        .collection('listings')
+                                                        .doc(l.id)
+                                                        .update({'status': 'resolved'});
+                                                    l.status = 'resolved';
+                                                    setSheetState(() {});
+                                                    NotificationService.showLocalNotification(
+                                                      'Eşya Bulundu! 🎉',
+                                                      '"${l.title}" ilanın çözüldü olarak işaretlendi.',
+                                                    );
+                                                    if (context.mounted) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(content: Text('✅ İlan çözüldü olarak işaretlendi!'), backgroundColor: Colors.green),
+                                                      );
+                                                    }
+                                                  } catch (e) {
+                                                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+                                                  }
+                                                },
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.teal,
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                  textStyle: const TextStyle(fontSize: 11),
+                                                ),
+                                                child: const Text('Bulundu!', style: TextStyle(color: Colors.white, fontSize: 11)),
+                                              ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 );
               },
@@ -5375,16 +5982,94 @@ class ProfileScreen extends StatelessWidget {
                         ListTile(
                           leading: const Icon(Icons.lock_outline, color: Colors.indigo),
                           title: const Text('Şifre Değiştir'),
-                          subtitle: const Text('Firebase ile yönetilir', style: TextStyle(fontSize: 11)),
+                          subtitle: const Text('Mevcut şifreni doğrulayarak güncelle', style: TextStyle(fontSize: 11)),
                           contentPadding: EdgeInsets.zero,
-                          onTap: () {},
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            final oldCtrl = TextEditingController();
+                            final newCtrl = TextEditingController();
+                            final confirmCtrl = TextEditingController();
+                            showDialog(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                title: const Text('Şifre Değiştir'),
+                                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                                  TextField(controller: oldCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Mevcut Şifre', prefixIcon: Icon(Icons.lock, color: Colors.grey))),
+                                  const SizedBox(height: 12),
+                                  TextField(controller: newCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Yeni Şifre (min. 6)', prefixIcon: Icon(Icons.lock_open, color: Colors.indigo))),
+                                  const SizedBox(height: 12),
+                                  TextField(controller: confirmCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Yeni Şifre (Tekrar)', prefixIcon: Icon(Icons.lock_reset, color: Colors.teal))),
+                                ]),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(c), child: const Text('İptal')),
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      final u = DataStore.currentUser;
+                                      if (u == null) return;
+                                      if (hashPassword(oldCtrl.text) != u.password) {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mevcut şifre yanlış!'), backgroundColor: Colors.red));
+                                        return;
+                                      }
+                                      if (newCtrl.text.length < 6) {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Şifre en az 6 karakter olmalı!'), backgroundColor: Colors.orange));
+                                        return;
+                                      }
+                                      if (newCtrl.text != confirmCtrl.text) {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Şifreler eşleşmiyor!'), backgroundColor: Colors.orange));
+                                        return;
+                                      }
+                                      try {
+                                        await FirebaseFirestore.instance.collection('users').doc(u.id).update({'password': hashPassword(newCtrl.text)});
+                                        u.password = hashPassword(newCtrl.text);
+                                        NotificationService.showLocalNotification('Şifre Değiştirildi 🔐', 'Hesap şifreniz başarıyla güncellendi. Güvende kalın!');
+                                        if (c.mounted) Navigator.pop(c);
+                                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Şifre başarıyla değiştirildi!'), backgroundColor: Colors.green));
+                                      } catch (e) {
+                                        if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e'), backgroundColor: Colors.red));
+                                      }
+                                    },
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo),
+                                    child: const Text('Güncelle'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
                         ListTile(
                           leading: const Icon(Icons.notifications_active_outlined, color: Colors.orange),
                           title: const Text('Bildirim Tercihleri'),
                           subtitle: const Text('Yeni eşleşme ve mesaj bildirimleri', style: TextStyle(fontSize: 11)),
                           contentPadding: EdgeInsets.zero,
-                          onTap: () {},
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            bool newMatch = true;
+                            bool portalAnnounce = true;
+                            bool dailyReminder = true;
+                            showDialog(
+                              context: context,
+                              builder: (c) => StatefulBuilder(
+                                builder: (c, setSt) => AlertDialog(
+                                  title: const Row(children: [Icon(Icons.notifications, color: Colors.orange), SizedBox(width: 8), Text('Bildirim Tercihleri')]),
+                                  content: Column(mainAxisSize: MainAxisSize.min, children: [
+                                    SwitchListTile(title: const Text('Yeni Eşleşme'), subtitle: const Text('Birisi ilanın için mesaj attığında'), value: newMatch, onChanged: (v) => setSt(() => newMatch = v), activeColor: Colors.orange, contentPadding: EdgeInsets.zero),
+                                    SwitchListTile(title: const Text('Portal Duyuruları'), subtitle: const Text('Okulundan yeni duyuru geldiğinde'), value: portalAnnounce, onChanged: (v) => setSt(() => portalAnnounce = v), activeColor: Colors.indigo, contentPadding: EdgeInsets.zero),
+                                    SwitchListTile(title: const Text('Günlük Hatırlatma'), subtitle: const Text('Kayıp kontrolü için hatırlatıcı'), value: dailyReminder, onChanged: (v) => setSt(() => dailyReminder = v), activeColor: Colors.teal, contentPadding: EdgeInsets.zero),
+                                  ]),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(c), child: const Text('İptal')),
+                                    ElevatedButton(
+                                      onPressed: () {
+                                        Navigator.pop(c);
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Bildirim tercihleri kaydedildi!'), backgroundColor: Colors.green));
+                                      },
+                                      child: const Text('Kaydet'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         ListTile(
                           leading: const Icon(Icons.privacy_tip_outlined, color: Colors.teal),
@@ -5655,21 +6340,41 @@ class ProfileScreen extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // 6. FAVORITES SCREEN (YENİ EKLENDİ)
 // ---------------------------------------------------------------------------
-class FavoritesScreen extends StatelessWidget {
+class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
 
   @override
+  State<FavoritesScreen> createState() => _FavoritesScreenState();
+}
+
+class _FavoritesScreenState extends State<FavoritesScreen> {
+  @override
   Widget build(BuildContext context) {
-    // DataStore.listings listesinden favori ID'lerine sahip olanları filtrele
-    final favoriteListings = DataStore.listings.where((listing) => DataStore.favoriteListingIds.contains(listing.id)).toList();
+    final favoriteListings = DataStore.listings
+        .where((l) => DataStore.favoriteListingIds.contains(l.id))
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Favorilerim'),
+        title: Text('Favorilerim (${favoriteListings.length})',
+            style: const TextStyle(letterSpacing: 0.5)),
         elevation: 0,
       ),
       body: favoriteListings.isEmpty
-          ? const Center(child: Text('Henüz favoriniz bulunmuyor.', style: TextStyle(color: Colors.grey)))
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.favorite_border, size: 72, color: Colors.grey[300]),
+                  const SizedBox(height: 16),
+                  Text('Henüz favoriniz yok.',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 15)),
+                  const SizedBox(height: 8),
+                  Text('İlanlardaki ❤️ ikonuna tıklayarak favorile.',
+                      style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+                ],
+              ),
+            )
           : GridView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               itemCount: favoriteListings.length,
@@ -5681,28 +6386,107 @@ class FavoritesScreen extends StatelessWidget {
               ),
               itemBuilder: (context, index) {
                 final listing = favoriteListings[index];
-                return Stack(
-                  children: [
-                    _buildListingCard(listing, context), // Gerçek kartı çiziyoruz
-                    // Favori ekranında olduğumuz için kalbe tıklandığında anında güncellemesi 
-                    // için üzerine devasa görünmez bir overlay koyabiliriz veya kartı stateful yapmalıyız. 
-                    // Ancak _buildListingCard doğrudan DataStore.isFavorite kullanıp 
-                    // state güncellediği için burada çalışır, ancak GridView kendini yenilemez.
-                  ],
+                return GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => DetailScreen(listing: listing)),
+                  ).then((_) => setState(() {})),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 4)),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              listing.imageFile != null
+                                  ? Image.file(listing.imageFile!, fit: BoxFit.cover)
+                                  : Image.network(
+                                      listing.imageUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (c, e, s) => Container(
+                                        color: Colors.grey[200],
+                                        child: const Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+                                      ),
+                                    ),
+                              Positioned(
+                                top: 8, right: 8,
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    await DataStore.toggleFavorite(listing.id);
+                                    setState(() {});
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.9),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.favorite, size: 18, color: Colors.red),
+                                  ),
+                                ),
+                              ),
+                              if (listing.isUrgent)
+                                Positioned(
+                                  top: 8, left: 8,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(8)),
+                                    child: const Text('ACİL', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          flex: 3,
+                          child: Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(listing.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                const Spacer(),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.location_on, size: 12, color: Colors.red),
+                                    const SizedBox(width: 3),
+                                    Expanded(
+                                      child: Text(
+                                        listing.location,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),
     );
   }
-
-  Widget _buildListingCard(Listing listing, BuildContext context) {
-    // HomeScreen'deki metoddan aynen alıyoruz ama state olmadığı için mock çalışır.
-    // Mimari bir sonraki adımda `Provider` veya global state yönetimini gerektirecek.
-    return Card(
-      child: Center(child: Text(listing.title)),
-    );
-  }
 }
+
 
 // ---------------------------------------------------------------------------
 // 6. RADAR MATCH ANIMATION (AKILLI TARAMA)
@@ -5893,11 +6677,23 @@ class MessagesScreen extends StatelessWidget {
                   itemBuilder: (context, i) {
                     final data = docs[i].data() as Map<String, dynamic>;
                     final chatId = docs[i].id;
-                    final List parts = data['participantNames'] ?? [];
-                    final otherName = parts.firstWhere(
-                      (n) => n != (DataStore.currentUser?.name ?? ''),
-                      orElse: () => 'Kullanıcı',
-                    );
+                    final me = DataStore.currentUser;
+                    final myNickname = (me?.nickname.isEmpty ?? true) ? 'Kullanıcı' : me!.nickname;
+                    
+                    final List nameParts = data['participantNames'] ?? [];
+                    final List avatarParts = data['participantAvatars'] ?? [];
+                    
+                    int otherIndex = -1;
+                    for(int k=0; k<nameParts.length; k++) {
+                      if (nameParts[k] != myNickname) {
+                        otherIndex = k;
+                        break;
+                      }
+                    }
+                    
+                    final otherName = otherIndex != -1 ? nameParts[otherIndex] : 'Anonim';
+                    final otherAvatar = otherIndex != -1 ? avatarParts[otherIndex] : '👤';
+
                     final lastMsg = data['lastMessage'] ?? '';
                     final lastAt = (data['lastMessageAt'] as Timestamp?)?.toDate();
                     final timeStr = lastAt != null
@@ -5907,11 +6703,8 @@ class MessagesScreen extends StatelessWidget {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       leading: CircleAvatar(
                         radius: 28,
-                        backgroundColor: Theme.of(context).primaryColor,
-                        child: Text(
-                          otherName.isNotEmpty ? otherName[0].toUpperCase() : '?',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-                        ),
+                        backgroundColor: const Color(0xFF0A1F44).withOpacity(0.1),
+                        child: Text(otherAvatar, style: const TextStyle(fontSize: 24)),
                       ),
                       title: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -5956,12 +6749,14 @@ class ChatDetailScreen extends StatefulWidget {
   final String chatId;
   final String otherUserName;
   final String otherUserId;
+  final String otherAvatar;
 
   const ChatDetailScreen({
     super.key,
     required this.chatId,
     required this.otherUserName,
     required this.otherUserId,
+    required this.otherAvatar,
   });
 
   @override
@@ -5971,196 +6766,193 @@ class ChatDetailScreen extends StatefulWidget {
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _msgController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  DateTime? _lastMessageTime;
 
   Future<void> _sendMessage() async {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
-    _msgController.clear();
+    
+    // Anti-spam
+    if (_lastMessageTime != null && DateTime.now().difference(_lastMessageTime!).inSeconds < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('⏳ Çok hızlı mesaj gönderiyorsunuz, lütfen biraz bekleyin.'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 1),
+      ));
+      return;
+    }
+    _lastMessageTime = DateTime.now();
+    if (text.isEmpty) return;
 
     final me = DataStore.currentUser;
+    if (me == null) return;
+
+    // ── KÜFÜR + BAN KONTROLÜ ──
+    final banUntil = DataStore.chatBanUntil[me.id];
+    if (banUntil != null && DateTime.now().isBefore(banUntil)) {
+      final remaining = banUntil.difference(DateTime.now());
+      HapticFeedback.heavyImpact();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('🚫 Mesajlaşma yasağı var! (${remaining.inHours} saat ${remaining.inMinutes % 60} dakika kaldı)'),
+        backgroundColor: Colors.red[800],
+      ));
+      return;
+    }
+
+    const profanityList = [
+      'orospu','sik','göt','amk','bok','oç','piç','yarrak','amına',
+      'salak','gerizekalı','aptal','mal','embesil','ahmak','dangalak','it',
+      'kahpe','ibne','siktir','lanet','haysiyetsiz'
+    ];
+    final lowerText = text.toLowerCase();
+    final hasProfanity = profanityList.any((word) => lowerText.contains(word));
+
+    if (hasProfanity) {
+      DataStore.profanityWarnings[me.id] = (DataStore.profanityWarnings[me.id] ?? 0) + 1;
+      final warnings = DataStore.profanityWarnings[me.id]!;
+      HapticFeedback.heavyImpact();
+
+      if (warnings >= 3) {
+        final banDays = 5 * (1 << (warnings - 3));
+        final banUntilNew = DateTime.now().add(Duration(days: banDays));
+        DataStore.chatBanUntil[me.id] = banUntilNew;
+        
+        NotificationService.showLocalNotification('🚫 Mesajlaşma Yasağı', '$banDays gün boyunca mesaj gönderemeyeceksiniz.');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('🚫 $warnings ihlal tespit edildi! Hesabınız $banDays gün men edildi.'),
+          backgroundColor: Colors.red[900],
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('⚠️ Uyarı $warnings/3: Uygunsuz ifade tespit edildi!'),
+          backgroundColor: Colors.orange[800],
+        ));
+      }
+      return;
+    }
+
+    _msgController.clear();
     final now = Timestamp.now();
     final expiry = Timestamp.fromDate(DateTime.now().add(const Duration(days: 30)));
 
-    final msgData = {
-      'senderId': me?.id ?? '',
-      'senderName': me?.name ?? 'Ben',
+    final chatRef = FirebaseFirestore.instance.collection('chats').doc(widget.chatId);
+    await chatRef.collection('messages').add({
+      'senderId': me.id,
+      'senderName': me.nickname.isEmpty ? 'Kullanıcı' : me.nickname,
       'text': text,
       'createdAt': now,
       'expiryAt': expiry,
-    };
-
-    final chatRef = FirebaseFirestore.instance.collection('chats').doc(widget.chatId);
-
-    // Mesajı ekle
-    await chatRef.collection('messages').add(msgData);
-
-    // Chat önizlemesini güncelle
-    await chatRef.update({
-      'lastMessage': text,
-      'lastMessageAt': now,
     });
+    await chatRef.update({'lastMessage': text, 'lastMessageAt': now});
 
-    // OTOMATİK BİLDİRİM (Mesaj Gönderildi Onayı)
-    NotificationService.showLocalNotification(
-      'Mesaj Gönderildi ✅',
-      '${widget.otherUserName} kullanıcısına mesajınız iletildi.',
-    );
-
-    // Scroll'u aşağı kaydır
+    NotificationService.showLocalNotification('Mesaj İletildi ✅', '${widget.otherUserName} kullanıcısına mesajınız ulaştı.');
+    
     Future.delayed(const Duration(milliseconds: 200), () {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final myId = DataStore.currentUser?.id ?? '';
-    final now = Timestamp.now();
-
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.otherUserName, style: const TextStyle(fontSize: 16)),
-            const Text('Doğrudan Mesaj', style: TextStyle(fontSize: 11, color: Colors.white70)),
-          ],
+        titleSpacing: 0,
+        backgroundColor: const Color(0xFF0A1F44),
+        foregroundColor: Colors.white,
+        title: GestureDetector(
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => AnonymousProfileScreen(
+              userId: widget.otherUserId,
+              nickname: widget.otherUserName,
+              avatar: widget.otherAvatar,
+              schoolName: 'Okul Üyesi',
+            )));
+          },
+          child: Row(children: [
+            CircleAvatar(radius: 18, backgroundColor: Colors.white10, child: Text(widget.otherAvatar, style: const TextStyle(fontSize: 18))),
+            const SizedBox(width: 12),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.otherUserName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              const Text('Çevrimiçi', style: TextStyle(fontSize: 10, color: Colors.greenAccent)),
+            ]),
+          ]),
         ),
       ),
-      backgroundColor: Colors.grey[100],
-      body: Column(
-        children: [
-          // 30 gün banner
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            color: Colors.amber.shade100,
-            child: Row(children: [
-              const Icon(Icons.timer_outlined, size: 13, color: Colors.orange),
-              const SizedBox(width: 6),
-              Text('Bu sohbet 30 günde otomatik silinir',
-                  style: TextStyle(fontSize: 12, color: Colors.orange.shade800)),
-            ]),
-          ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('chats')
-                  .doc(widget.chatId)
-                  .collection('messages')
-                  .where('expiryAt', isGreaterThan: now)
-                  .orderBy('expiryAt')
-                  .orderBy('createdAt')
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final msgs = snapshot.data?.docs ?? [];
-                if (msgs.isEmpty) {
-                  return const Center(
-                    child: Text('Henüz mesaj yok.\nİlk mesajı sen gönder! 👋',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey)),
-                  );
-                }
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: msgs.length,
-                  itemBuilder: (context, i) {
-                    final m = msgs[i].data() as Map<String, dynamic>;
-                    final isMe = m['senderId'] == myId;
-                    final createdAt = (m['createdAt'] as Timestamp?)?.toDate();
-                    final timeStr = createdAt != null
-                        ? '${createdAt.hour}:${createdAt.minute.toString().padLeft(2, '0')}'
-                        : '';
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Align(
-                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isMe ? Theme.of(context).primaryColor : Colors.white,
-                            borderRadius: BorderRadius.circular(16).copyWith(
-                              bottomRight: isMe ? const Radius.circular(0) : null,
-                              bottomLeft: !isMe ? const Radius.circular(0) : null,
-                            ),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                            children: [
-                              Text(m['text'] ?? '',
-                                  style: TextStyle(
-                                      color: isMe ? Colors.white : Colors.black87, fontSize: 15)),
-                              const SizedBox(height: 4),
-                              Text(timeStr,
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      color: isMe ? Colors.white70 : Colors.grey)),
-                            ],
-                          ),
-                        ),
+      body: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: Colors.amber.shade100,
+          child: Row(children: [
+            const Icon(Icons.timer_outlined, size: 14, color: Colors.orange),
+            const SizedBox(width: 6),
+            Text('Mesajlar 30 günde otomatik silinir', style: TextStyle(fontSize: 12, color: Colors.orange.shade800)),
+          ]),
+        ),
+        Expanded(child: StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance.collection('chats').doc(widget.chatId).collection('messages').orderBy('createdAt', descending: false).snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+            final msgs = snapshot.data!.docs;
+            return ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.all(16),
+              itemCount: msgs.length,
+              itemBuilder: (context, i) {
+                final m = msgs[i].data() as Map<String, dynamic>;
+                final isMe = m['senderId'] == DataStore.currentUser?.id;
+                final ts = m['createdAt'] as Timestamp?;
+                final time = ts != null ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, "0")}' : '';
+                return Align(
+                  alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                    decoration: BoxDecoration(
+                      color: isMe ? const Color(0xFF0A1F44) : Colors.white,
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(16),
+                        topRight: const Radius.circular(16),
+                        bottomLeft: Radius.circular(isMe ? 16 : 4),
+                        bottomRight: Radius.circular(isMe ? 4 : 16),
                       ),
-                    );
-                  },
+                      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 3, offset: const Offset(0, 2))],
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                      Text(m['text'] ?? '', style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 14)),
+                      const SizedBox(height: 4),
+                      Text(time, style: TextStyle(color: isMe ? Colors.white70 : Colors.grey, fontSize: 9)),
+                    ]),
+                  ),
                 );
               },
+            );
+          },
+        )),
+        Container(
+          padding: const EdgeInsets.all(12),
+          color: Colors.white,
+          child: SafeArea(child: Row(children: [
+            Expanded(child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(24)),
+              child: TextField(controller: _msgController, decoration: const InputDecoration(hintText: 'Mesaj yaz...', border: InputBorder.none, hintStyle: TextStyle(fontSize: 14))),
+            )),
+            const SizedBox(width: 8),
+            Container(
+              decoration: const BoxDecoration(color: Color(0xFF0A1F44), shape: BoxShape.circle),
+              child: IconButton(icon: const Icon(Icons.send, color: Colors.white, size: 20), onPressed: _sendMessage),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(12),
-            color: Colors.white,
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _msgController,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      hintText: 'Mesaj yazın...',
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor,
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                    onPressed: _sendMessage,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+          ])),
+        ),
+      ]),
     );
   }
 }
-
-// Harita Zemin Çizimi (Grid)
 class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -6503,19 +7295,50 @@ class _MockMapScreenState extends State<MockMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final lat = widget.listing.latitude ?? 39.9208;
+    final lng = widget.listing.longitude ?? 32.8541;
+
     return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.listing.title, style: const TextStyle(fontSize: 16)),
+        backgroundColor: Colors.red,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.directions),
+            tooltip: 'Yol Tarifi',
+            onPressed: () async {
+              final uri = Uri.parse(
+                'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+              );
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              }
+            },
+          ),
+        ],
+      ),
       body: Stack(
-        // <-- WIDGET'LAR ÜST ÜSTE BİNSİN DİYE STACK EKLENDİ
         children: [
-          // Sahte Harita Arka Planı
-          Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: NetworkImage(
-                    'https://via.placeholder.com/800x1200.png?text=Google+Maps+Simulasyonu'),
-                fit: BoxFit.cover,
-              ),
+          // Gerçek OpenStreetMap harita
+          FlutterMap(
+            options: MapOptions(
+              initialCenter: LatLng(lat, lng),
+              initialZoom: 15,
             ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.gorbul.app',
+              ),
+              MarkerLayer(markers: [
+                Marker(
+                  point: LatLng(lat, lng),
+                  width: 50,
+                  height: 50,
+                  child: const Icon(Icons.location_pin, color: Colors.red, size: 50),
+                ),
+              ]),
+            ],
           ),
           // Konum Pini
           Center(
@@ -6577,11 +7400,13 @@ class _MockMapScreenState extends State<MockMapScreen> {
                   IconButton(
                     icon: const Icon(Icons.directions,
                         color: Colors.blue, size: 30),
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Yol tarifi başlatılıyor...')),
+                    onPressed: () async {
+                      final uri = Uri.parse(
+                        'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
                       );
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
                     },
                   ),
                 ],
@@ -6807,9 +7632,22 @@ class LeaderboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> heroes = DataStore.currentUser != null ? [
-      {'name': DataStore.currentUser!.name, 'score': 0, 'rank': 'Yeni Katılımcı', 'finds': 0, 'color': Colors.blueGrey},
-    ] : [];
+    final List<Map<String, dynamic>> heroes = [
+      {'name': 'Deniz Y.', 'score': 1500, 'rank': 'Sherlock', 'finds': 15, 'color': Colors.amber},
+      {'name': 'Ahmet K.', 'score': 1200, 'rank': 'Dedektif', 'finds': 12, 'color': Colors.grey},
+      {'name': 'Zeynep B.', 'score': 900, 'rank': 'Gözlemci', 'finds': 9, 'color': Colors.brown},
+    ];
+    if (DataStore.currentUser != null) {
+      heroes.add({'name': DataStore.currentUser!.name, 'score': 0, 'rank': 'Yeni Katılımcı', 'finds': 0, 'color': Colors.blueGrey});
+    }
+
+    Widget getRankWidget(int index, Color color) {
+      if (index == 0) return const Text('🥇', style: TextStyle(fontSize: 24));
+      if (index == 1) return const Text('🥈', style: TextStyle(fontSize: 24));
+      if (index == 2) return const Text('🥉', style: TextStyle(fontSize: 24));
+      return Text('#\${index + 1}', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16));
+    }
+
 
     return Scaffold(
       appBar: AppBar(
@@ -6858,10 +7696,7 @@ class LeaderboardScreen extends StatelessWidget {
                     leading: CircleAvatar(
                       backgroundColor: hero['color']?.withOpacity(0.2),
                       radius: 24,
-                      child: Text(
-                        '#${index + 1}',
-                        style: TextStyle(color: hero['color'], fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
+                      child: getRankWidget(index, hero['color']),
                     ),
                     title: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -6921,18 +7756,48 @@ class _DigitalVaultScreenState extends State<DigitalVaultScreen> {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: () {
-              // Gerçek veri akışıyla yeni eşya ekle
-              DataStore.addVaultItem(VaultItem(
-                id: DateTime.now().millisecondsSinceEpoch.toString(),
-                title: 'Kişisel Eşya ${DataStore.vaultItems.length + 1}',
-                serial: 'SN-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
-                date: '${DateTime.now().day}/${DateTime.now().month}/${DateTime.now().year}',
-                iconCodePoint: Icons.inventory_2_outlined.codePoint,
-                colorValue: Colors.indigo.value,
-              )).then((_) => setState(() {}));
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Eşya dolaba güvenle eklendi ve buluta yedeklendi! 🛡️')),
+              final titleCtrl = TextEditingController();
+              final serialCtrl = TextEditingController();
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+                builder: (ctx) => Padding(
+                  padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 24, right: 24, top: 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Center(child: Icon(Icons.security, size: 48, color: Colors.indigo)),
+                      const SizedBox(height: 16),
+                      const Text('Yeni Eşya Ekle', textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 16),
+                      TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Eşya Adı (Örn: Mavi Bisiklet)', prefixIcon: Icon(Icons.label))),
+                      const SizedBox(height: 12),
+                      TextField(controller: serialCtrl, decoration: const InputDecoration(labelText: 'Seri No / Ayırt Edici Özellik', prefixIcon: Icon(Icons.tag))),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (titleCtrl.text.trim().isEmpty) return;
+                          final vItem = VaultItem(
+                            id: DateTime.now().millisecondsSinceEpoch.toString(),
+                            title: titleCtrl.text.trim(),
+                            serial: serialCtrl.text.trim().isEmpty ? 'SN-\${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}' : serialCtrl.text.trim(),
+                            date: '\${DateTime.now().day}/\${DateTime.now().month}/\${DateTime.now().year}',
+                            iconCodePoint: Icons.inventory_2_outlined.codePoint,
+                            colorValue: Colors.indigo.value,
+                          );
+                          DataStore.addVaultItem(vItem).then((_) => setState(() {}));
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Eşya başarıyla şifrelenip eklendi! 🛡️'), backgroundColor: Colors.green));
+                        },
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, padding: const EdgeInsets.symmetric(vertical: 16)),
+                        child: const Text('KASAYA KİLİTLE', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
+                ),
               );
             },
           )
