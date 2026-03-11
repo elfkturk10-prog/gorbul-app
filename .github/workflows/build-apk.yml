@@ -38,7 +38,7 @@ jobs:
           cp android/app/google-services.json /tmp/android_backup/ || true
           cp -r android/app/src/main/res/drawable/* /tmp/android_backup/res/drawable/ || true
           
-          # Remove and recreate Android project with correct package name
+          # Remove and recreate Android project (Restores essential build files correctly)
           rm -rf android
           flutter create --platforms=android --org com.gorbul --project-name app .
           
@@ -46,65 +46,28 @@ jobs:
           cp /tmp/android_backup/google-services.json android/app/ || true
           cp -r /tmp/android_backup/res/drawable/* android/app/src/main/res/drawable/ || true
           
-          # Use Python to safely patch gradle files
-          python3 -c "
-          import os
-
-          # 1. Patch android/settings.gradle (Add GMS)
-          with open('android/settings.gradle', 'r') as f: content = f.read()
-          if 'com.google.gms.google-services' not in content:
-              content = content.replace('plugins {', 'plugins {\n    id \"com.google.gms.google-services\" version \"4.4.1\" apply false')
-          with open('android/settings.gradle', 'w') as f: f.write(content)
-
-          # 2. Patch root android/build.gradle (Global Fix for Plugins - APPEND only)
-          # We use ext.set to provide properties precisely as expected by plugins like geolocator
-          with open('android/build.gradle', 'a') as f:
-              f.write(\"\"\"
-          allprojects {
-              project.ext.set('flutter.compileSdkVersion', 35)
-              project.ext.set('flutter.targetSdkVersion', 35)
-              project.ext.set('flutter.minSdkVersion', 23)
-              
-              subprojects {
-                  afterEvaluate { project ->
-                      if (project.hasProperty('android')) {
-                          project.android {
-                              if (namespace == null) {
-                                  namespace project.group
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          \"\"\")
-
-          # 3. Patch android/app/build.gradle (Maintain existing but fix SDKs)
-          with open('android/app/build.gradle', 'r') as f: content = f.read()
-          # Add GMS plugin if missing
-          if 'id \"com.google.gms.google-services\"' not in content:
-              content = content.replace('plugins {', 'plugins {\n    id \"com.google.gms.google-services\"')
-          # Fix JVM targets
-          if 'compileOptions {' not in content:
-              content = content.replace('android {', 'android {\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }\n    kotlinOptions {\n        jvmTarget = \"1.8\"\n    }')
-          # Force app versions
-          content = content.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35')
-          content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
-          content = content.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
-          with open('android/app/build.gradle', 'w') as f: f.write(content)
-          "
-
-          # Fix App Name
-          sed -i 's/android:label=\"app\"/android:label=\"GörBul\"/g' android/app/src/main/AndroidManifest.xml || true
+          # SURGICAL PATCHING (No aggressive overwrites)
           
-          # Final build checks
-          echo \"flutter.sdk=$FLUTTER_ROOT\" > android/local.properties
-          echo \"sdk.dir=$ANDROID_SDK_ROOT\" >> android/local.properties
-          yes | flutter doctor --android-licenses || true
-
-
-
-          # Android Lisanslarını Onayla (Build başarısı için kritik)
+          # 1. Add GMS to settings.gradle
+          sed -i 's/plugins {/plugins {\n    id "com.google.gms.google-services" version "4.4.1" apply false/g' android/settings.gradle
+          
+          # 2. Add GMS to app build.gradle
+          sed -i 's/id "dev.flutter.flutter-gradle-plugin"/id "dev.flutter.flutter-gradle-plugin"\n    id "com.google.gms.google-services"/g' android/app/build.gradle
+          
+          # 3. Force JVM 1.8 and Hardcode SDK versions (Bypasses all property resolution issues)
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 35/g' android/app/build.gradle
+          
+          # Inject JVM options into android { ... } block
+          sed -i '/android {/a \    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }\n    kotlinOptions {\n        jvmTarget = "1.8"\n    }' android/app/build.gradle
+          
+          # Fix App Name
+          sed -i 's/android:label="app"/android:label="GörBul"/g' android/app/src/main/AndroidManifest.xml || true
+          
+          # Final build prep
+          echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
           yes | flutter doctor --android-licenses || true
 
       # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)

@@ -29,6 +29,9 @@ dependencies:
   firebase_messaging: any
   flutter_local_notifications: any
 
+dependency_overrides:
+  geolocator_android: 4.6.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
