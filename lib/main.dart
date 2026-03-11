@@ -337,13 +337,14 @@ class Listing {
   final File? imageFile; // Yerel test için
   final String securityQuestion;
   final String securityAnswer;
+  final bool isUrgent;
   final String ownerName;
   final String rewardAmount;
   final String schoolName;
   final String ownerId;
   final String ownerAvatar; // Anonim kimlik
   final String ownerNickname; // Anonim kimlik
-  final String status; // 'active' veya 'resolved'
+  String status; // 'active' veya 'resolved' — mutable
 
   Listing({
     required this.id,
@@ -366,6 +367,7 @@ class Listing {
     this.ownerNickname = '',
     this.status = 'active',
   }) : expiryDate = expiryDate ?? date.add(const Duration(days: 15));
+
 
   Map<String, dynamic> toJson() {
     return {
@@ -4801,7 +4803,7 @@ class DetailScreen extends StatelessWidget {
                 icon: const Icon(Icons.share),
                 tooltip: 'İlanı Paylaş',
                 onPressed: () {
-                  final text = 'GörBul\\'da bir ilan var: "${listing.title}" - ${listing.location}\\n\\nDetaylar için GörBul uygulamasına gözat!';
+                  final text = '"${listing.title}" kaybolan bir eşya.\nKonum: ${listing.location}\n\nGörBul uygulamasından bulabilirsin!';
                   Share.share(text);
                 },
               ),
@@ -5220,6 +5222,19 @@ class DetailScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildBadge(IconData icon, String label, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+          child: Icon(icon, color: color, size: 22),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+      ],
+    );
   }
 }
 
@@ -5405,7 +5420,7 @@ class AnonymousProfileScreen extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Bu profil GörBul tarafından doğrulanmıştır. Kullanıcı bilgileri anonim olarak saklanmaktadır.',
-                        style: TextStyle(fontSize: 13, color: Colors.blueScale),
+                        style: TextStyle(fontSize: 13, color: Colors.blue[800]),
                       ),
                     ),
                   ],
@@ -5462,7 +5477,7 @@ class AnonymousProfileScreen extends StatelessWidget {
   }
 }
 
-const Colors blueScale = Colors.blue; // Helper for older styles if any
+// blueScale helper intentionally removed — use Colors.blue[800] instead
 
 // Kücük yardımcı widget
 class ROWTitle extends StatelessWidget {
@@ -6725,6 +6740,7 @@ class MessagesScreen extends StatelessWidget {
                           builder: (_) => ChatDetailScreen(
                             chatId: chatId,
                             otherUserName: otherName,
+                            otherAvatar: otherAvatar,
                             otherUserId: (data['participants'] as List)
                                 .firstWhere((id) => id != myId, orElse: () => ''),
                           ),
