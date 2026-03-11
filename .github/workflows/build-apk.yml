@@ -56,40 +56,44 @@ jobs:
               content = content.replace('plugins {', 'plugins {\n    id \"com.google.gms.google-services\" version \"4.4.1\" apply false')
           with open('android/settings.gradle', 'w') as f: f.write(content)
 
-          # 2. Patch root android/build.gradle (Force versions for all plugins)
-          with open('android/build.gradle', 'r') as f: content = f.read()
-          # Add explicit versions at the top and force them in subprojects
+          # 2. Patch root android/build.gradle (Global Fix for Plugins)
+          # We define a global 'flutter' object that geolocator and others look for
           patch = \"\"\"
-          rootProject.ext.compileSdkVersion = 35
-          rootProject.ext.targetSdkVersion = 35
-          rootProject.ext.minSdkVersion = 23
-
-          subprojects {
-              afterEvaluate { project ->
-                  if (project.hasProperty('android')) {
-                      project.android {
-                          compileSdkVersion 35
-                          buildToolsVersion \"35.0.0\"
-                          
-                          defaultConfig {
-                              targetSdkVersion 35
+          allprojects {
+              ext.flutter = [
+                  compileSdkVersion: 35,
+                  targetSdkVersion: 35,
+                  minSdkVersion: 23
+              ]
+              
+              // Standard version forcing for all subprojects
+              subprojects {
+                  afterEvaluate { project ->
+                      if (project.hasProperty('android')) {
+                          project.android {
+                              compileSdkVersion 35
+                              buildToolsVersion '35.0.0'
+                              defaultConfig {
+                                  targetSdkVersion 35
+                                  minSdkVersion 23
+                              }
                           }
                       }
                   }
               }
           }
           \"\"\"
-          with open('android/build.gradle', 'w') as f: f.write(patch + content)
+          with open('android/build.gradle', 'w') as f: f.write(patch)
 
-          # 3. Patch android/app/build.gradle (Add GMS, JVM 1.8, and Explicit SDKs)
+          # 3. Patch android/app/build.gradle (Standard setup)
           with open('android/app/build.gradle', 'r') as f: content = f.read()
           # Add GMS plugin
           if 'com.google.gms.google-services' not in content:
               content = content.replace('id \"dev.flutter.flutter-gradle-plugin\"', 'id \"dev.flutter.flutter-gradle-plugin\"\n    id \"com.google.gms.google-services\"')
-          # Force JVM targets
+          # Fix JVM targets
           if 'compileOptions {' not in content:
               content = content.replace('android {', 'android {\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }\n    kotlinOptions {\n        jvmTarget = \"1.8\"\n    }')
-          # Force versions for stability in app module
+          # Force app versions
           content = content.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35')
           content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
           content = content.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
@@ -103,6 +107,7 @@ jobs:
           echo \"flutter.sdk=$FLUTTER_ROOT\" > android/local.properties
           echo \"sdk.dir=$ANDROID_SDK_ROOT\" >> android/local.properties
           yes | flutter doctor --android-licenses || true
+
 
 
           # Android Lisanslarını Onayla (Build başarısı için kritik)
