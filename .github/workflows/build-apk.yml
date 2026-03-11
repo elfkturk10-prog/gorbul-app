@@ -56,22 +56,30 @@ jobs:
               content = content.replace('plugins {', 'plugins {\n    id \"com.google.gms.google-services\" version \"4.4.1\" apply false')
           with open('android/settings.gradle', 'w') as f: f.write(content)
 
-          # 2. Patch root android/build.gradle (Add Ext properties for plugins)
+          # 2. Patch root android/build.gradle (Force versions for all plugins)
           with open('android/build.gradle', 'r') as f: content = f.read()
-          ext_block = \"\"\"
-          allprojects {
-              ext.compileSdkVersion = 35
-              ext.targetSdkVersion = 35
-              ext.minSdkVersion = 23
-              repositories {
-                  google()
-                  mavenCentral()
+          # Add explicit versions at the top and force them in subprojects
+          patch = \"\"\"
+          rootProject.ext.compileSdkVersion = 35
+          rootProject.ext.targetSdkVersion = 35
+          rootProject.ext.minSdkVersion = 23
+
+          subprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty('android')) {
+                      project.android {
+                          compileSdkVersion 35
+                          buildToolsVersion \"35.0.0\"
+                          
+                          defaultConfig {
+                              targetSdkVersion 35
+                          }
+                      }
+                  }
               }
           }
           \"\"\"
-          if 'allprojects {' not in content:
-              content += ext_block
-          with open('android/build.gradle', 'w') as f: f.write(content)
+          with open('android/build.gradle', 'w') as f: f.write(patch + content)
 
           # 3. Patch android/app/build.gradle (Add GMS, JVM 1.8, and Explicit SDKs)
           with open('android/app/build.gradle', 'r') as f: content = f.read()
@@ -81,7 +89,7 @@ jobs:
           # Force JVM targets
           if 'compileOptions {' not in content:
               content = content.replace('android {', 'android {\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }\n    kotlinOptions {\n        jvmTarget = \"1.8\"\n    }')
-          # Force versions for stability
+          # Force versions for stability in app module
           content = content.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35')
           content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
           content = content.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
@@ -91,7 +99,7 @@ jobs:
           # Fix App Name
           sed -i 's/android:label=\"app\"/android:label=\"GörBul\"/g' android/app/src/main/AndroidManifest.xml || true
           
-          # Final build checks (Critical for geolocator)
+          # Final build checks
           echo \"flutter.sdk=$FLUTTER_ROOT\" > android/local.properties
           echo \"sdk.dir=$ANDROID_SDK_ROOT\" >> android/local.properties
           yes | flutter doctor --android-licenses || true
