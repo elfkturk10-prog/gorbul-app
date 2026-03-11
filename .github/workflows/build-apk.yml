@@ -50,29 +50,50 @@ jobs:
           python3 -c "
           import os
 
-          # 1. Patch android/settings.gradle
+          # 1. Patch android/settings.gradle (Add GMS)
           with open('android/settings.gradle', 'r') as f: content = f.read()
           if 'com.google.gms.google-services' not in content:
               content = content.replace('plugins {', 'plugins {\n    id \"com.google.gms.google-services\" version \"4.4.1\" apply false')
           with open('android/settings.gradle', 'w') as f: f.write(content)
 
-          # 2. Patch android/app/build.gradle
+          # 2. Patch root android/build.gradle (Add Ext properties for plugins)
+          with open('android/build.gradle', 'r') as f: content = f.read()
+          ext_block = \"\"\"
+          allprojects {
+              ext.compileSdkVersion = 35
+              ext.targetSdkVersion = 35
+              ext.minSdkVersion = 23
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          \"\"\"
+          if 'allprojects {' not in content:
+              content += ext_block
+          with open('android/build.gradle', 'w') as f: f.write(content)
+
+          # 3. Patch android/app/build.gradle (Add GMS, JVM 1.8, and Explicit SDKs)
           with open('android/app/build.gradle', 'r') as f: content = f.read()
           # Add GMS plugin
           if 'com.google.gms.google-services' not in content:
               content = content.replace('id \"dev.flutter.flutter-gradle-plugin\"', 'id \"dev.flutter.flutter-gradle-plugin\"\n    id \"com.google.gms.google-services\"')
-          # Fix JVM targets and minSdkVersion
-          content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
+          # Force JVM targets
           if 'compileOptions {' not in content:
               content = content.replace('android {', 'android {\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }\n    kotlinOptions {\n        jvmTarget = \"1.8\"\n    }')
+          # Force versions for stability
+          content = content.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35')
+          content = content.replace('minSdk = flutter.minSdkVersion', 'minSdk = 23')
+          content = content.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
           with open('android/app/build.gradle', 'w') as f: f.write(content)
           "
 
           # Fix App Name
           sed -i 's/android:label=\"app\"/android:label=\"GörBul\"/g' android/app/src/main/AndroidManifest.xml || true
           
-          # Final build checks
+          # Final build checks (Critical for geolocator)
           echo \"flutter.sdk=$FLUTTER_ROOT\" > android/local.properties
+          echo \"sdk.dir=$ANDROID_SDK_ROOT\" >> android/local.properties
           yes | flutter doctor --android-licenses || true
 
 
