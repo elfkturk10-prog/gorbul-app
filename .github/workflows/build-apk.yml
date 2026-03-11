@@ -9,8 +9,10 @@ on:
 
 jobs:
   build:
-    name: Build & Release Universal APK
+    name: Build & Release Optimized APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
@@ -70,30 +72,35 @@ jobs:
           echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
           yes | flutter doctor --android-licenses || true
 
-      # Tüm Android mimarileri için FAT/Evrensel APK (tek dosya, her cihazda çalışır)
-      - name: Build APK
-        run: flutter build apk --release --build-name=1.0.0 --build-number=1 --no-tree-shake-icons
+      # Mimari bazlı split APK'lar (Boyutu %70 azaltır ve daha hızlı iner)
+      - name: Build APK (Optimized)
+        run: flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/app/outputs/symbols --build-name=1.0.0 --build-number=1
 
       - name: Get Version Tag
         id: version
         run: echo "tag=v$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
 
-      # GitHub Release oluştur ve APK'yı yükle
+      # GitHub Release oluştur ve Optimize edilmiş APK'ları yükle
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "GörBul ${{ steps.version.outputs.tag }}"
+          name: "GörBul - Optimize APK ${{ steps.version.outputs.tag }}"
           body: |
-            ## GörBul - Kayıp Eşya Ağı
+            ## GörBul - Kayıp Eşya Ağı (Optimize Sürüm) 🚀
 
-            Tüm Android cihazlarla uyumlu evrensel APK
+            Bu sürüm cihaz mimarinize göre optimize edilmedir. Boyutu çok daha küçüktür.
+
+            **Hangi dosyayı indirmeliyim?**
+            *   **armeabi-v7a:** Eski telefonlar için.
+            *   **arm64-v8a:** Yeni nesil telefonların %99'u için (Tavsiye edilen).
+            *   **x86_64:** Emülatörler için.
 
             **Kurulum:**
-            1. `app-release.apk` dosyasını indir
-            2. Telefonda *Bilinmeyen kaynaklar*'a izin ver
+            1. Mimarinize uygun APK'yı indir.
+            2. Telefonda *Bilinmeyen kaynaklar*'a izin ver.
             3. Yükle ve aç!
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -101,6 +108,6 @@ jobs:
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gorbul-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: gorbul-optimized-apks
+          path: build/app/outputs/flutter-apk/app-*.apk
           retention-days: 30
