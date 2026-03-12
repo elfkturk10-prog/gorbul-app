@@ -33,6 +33,9 @@ jobs:
       - name: Get Dependencies
         run: flutter pub get
 
+      - name: Generate Launcher Icons
+        run: flutter pub run flutter_launcher_icons
+
       - name: Configure Android & Firebase
         run: |
           # Backup special files
